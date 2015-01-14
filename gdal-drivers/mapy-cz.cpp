@@ -32,21 +32,21 @@ GDALDataset* MapyczDataset::Open(GDALOpenInfo* openInfo)
     fs::path path(openInfo->pszFilename);
 
     // check whether filename is a directory
-    if ( ! openInfo->bIsDirectory ) {
+    if (!openInfo->bIsDirectory) {
         // skip driver
         return 0x0;
     }
 
     // look for configuration file
     std::ifstream f;
-    f.exceptions( std::ios::badbit | std::ios::failbit );
+    f.exceptions(std::ios::badbit | std::ios::failbit);
 
     try {
 
-        f.open( ( path / "gtt_config.json" ).string(), std::ios_base::in );
-        f.exceptions( std::ios::badbit );
+        f.open((path / "gtt_config.json").string(), std::ios_base::in);
+        f.exceptions(std::ios::badbit);
 
-    } catch ( std::ifstream::failure ) {
+    } catch (std::ifstream::failure) {
 
         // skip driver
         return 0x0;
@@ -55,11 +55,11 @@ GDALDataset* MapyczDataset::Open(GDALOpenInfo* openInfo)
     // ok, we take ownership, no silent skipping from now on
 
     // no updates
-    if( openInfo->eAccess == GA_Update ) {
+    if(openInfo->eAccess == GA_Update) {
 
-        CPLError( CE_Failure, CPLE_NotSupported,
+        CPLError(CE_Failure, CPLE_NotSupported,
                   "The JDEM driver does not support update access to existing"
-                  " datasets.\n" );
+                  " datasets.\n");
         return 0x0;
     }
 
@@ -68,26 +68,26 @@ GDALDataset* MapyczDataset::Open(GDALOpenInfo* openInfo)
 
         Json::Reader reader;
 
-        if ( ! reader.parse( f, config ) ) {
+        if (!reader.parse(f, config)) {
 
-            CPLError( CE_Failure, CPLE_IllegalArg,
+            CPLError(CE_Failure, CPLE_IllegalArg,
                       "Failed to parse GTT configuration file (%s).\n",
-                      reader.getFormatedErrorMessages().c_str() );
+                      reader.getFormatedErrorMessages().c_str());
             return 0x0;
         }
 
         f.close();
 
-    } catch ( std::exception & ) {
+    } catch (std::exception &) {
 
-        CPLError( CE_Failure, CPLE_FileIO, "Unable to read GTT config_file.\n" );
+        CPLError(CE_Failure, CPLE_FileIO, "Unable to read GTT config_file.\n");
         return 0x0;
     }
 
     // check for tile index
     fs::path tileIndexPath = path / "gtt_index.csv";
 
-    if ( ! exists( tileIndexPath ) ) {
+    if (!exists(tileIndexPath)) {
         // TODO: catch error
         try {
             buildIndex(path, tileIndexPath, config);
@@ -104,14 +104,14 @@ GDALDataset* MapyczDataset::Open(GDALOpenInfo* openInfo)
 
     try {
 
-        ut::separated_values::parse( tileIndexPath, ",",
-            [&]( const std::vector<std::string> & values ) {
-                tileIndex.emplace_back( values );
-            } );
+        ut::separated_values::parse(tileIndexPath, ",",
+            [&](const std::vector<std::string> & values) {
+                tileIndex.emplace_back(values);
+            });
 
-    }  catch ( const std::exception & e) {
+    }  catch (const std::exception & e) {
 
-        CPLError( CE_Failure, CPLE_IllegalArg
+        CPLError(CE_Failure, CPLE_IllegalArg
                   , "Could not parse GTT tile index: <%s>.\n"
                   , e.what());
         return nullptr;
@@ -121,12 +121,12 @@ GDALDataset* MapyczDataset::Open(GDALOpenInfo* openInfo)
     // initialize dataset
     try {
 
-        dset = new MapyczDataset( path, config, tileIndex );
+        dset = new MapyczDataset(path, config, tileIndex);
 
-    } catch ( std::runtime_error & e ) {
+    } catch (std::runtime_error & e) {
 
-        CPLError( CE_Failure, CPLE_IllegalArg,
-            "Dataset initialization failure (%s).\n", e.what() );
+        CPLError(CE_Failure, CPLE_IllegalArg,
+            "Dataset initialization failure (%s).\n", e.what());
         return nullptr;
     }
 
@@ -145,7 +145,7 @@ MapyczDataset::MapyczDataset()
     // process tile index
     cols_ = 0; rows_ = 0;
 
-    for ( std::vector<std::string> tileinfo : tileIndex ) {
+    for (std::vector<std::string> tileinfo : tileIndex) {
 
         TileId tileId;
         TileDesc tileDesc;
@@ -154,34 +154,34 @@ MapyczDataset::MapyczDataset()
 
             tileId = TileId(
                 boost::lexical_cast<uint>(tileinfo[0]),
-                boost::lexical_cast<uint>(tileinfo[1]) );
+                boost::lexical_cast<uint>(tileinfo[1]));
 
             tileDesc = TileDesc(
                 tileinfo[2],
                 boost::lexical_cast<double>(tileinfo[3]),
                 boost::lexical_cast<double>(tileinfo[4]),
                 boost::lexical_cast<double>(tileinfo[5]),
-                boost::lexical_cast<double>(tileinfo[6]) );
+                boost::lexical_cast<double>(tileinfo[6]));
 
-        } catch ( boost::bad_lexical_cast & e ) {
+        } catch (boost::bad_lexical_cast & e) {
             utility::raise<std::runtime_error>
                 ("Invalid format: <%s>.", e.what());
         }
 
         tileIndex_[ tileId ] = tileDesc;
 
-        if ( empty( extents_ ) ) {
+        if (empty(extents_)) {
             extents_ = tileDesc.extents;
         } else {
-            extents_  = unite( extents_, tileDesc.extents );
+            extents_  = unite(extents_, tileDesc.extents);
         }
 
-        cols_ = std::max( cols_, tileId.x + 1 );
-        rows_ = std::max( rows_, tileId.y + 1 );
+        cols_ = std::max(cols_, tileId.x + 1);
+        rows_ = std::max(rows_, tileId.y + 1);
     }
 
     // raster size
-    if ( tileType_ == TileType::Grid ) {
+    if (tileType_ == TileType::Grid) {
 
         // grid registration
         nRasterXSize = cols_ * tilePixels_ + 1;
@@ -211,12 +211,12 @@ MapyczDataset::MapyczDataset()
         // channels
         Json::Value channels = config["channels"];
 
-        for ( uint i = 1; i <= channels.size(); i++ ) {
+        for (uint i = 1; i <= channels.size(); i++) {
 
-            SetBand( i, new MapyczRasterBand( this, i, channels[i-1] ) );
+            SetBand(i, new MapyczRasterBand(this, i, channels[i-1]));
         }
 
-    } catch ( const Json::Error & e  ) {
+    } catch (const Json::Error & e ) {
         utility::raise<std::runtime_error>("Invalid format: <%s>.", e.what());
     }
 
@@ -224,7 +224,7 @@ MapyczDataset::MapyczDataset()
 #endif
 }
 
-CPLErr MapyczDataset::GetGeoTransform( double * padfTransform ) {
+CPLErr MapyczDataset::GetGeoTransform(double * padfTransform) {
 
     padfTransform[0] = extents_.ll[0];
     padfTransform[1] = tileUnits_ / tilePixels_;
@@ -244,7 +244,7 @@ const char * MapyczDataset::GetProjectionRef() {
 
 /* MapyczRasterBand */
 
-MapyczRasterBand::MapyczRasterBand( MapyczDataset * dset, int numBand
+MapyczRasterBand::MapyczRasterBand(MapyczDataset * dset, int numBand
                                     , int channel)
 {
     (void) dset; (void) numBand; (void) channel;
@@ -256,139 +256,139 @@ MapyczRasterBand::MapyczRasterBand( MapyczDataset * dset, int numBand
     nBlockXSize = nBlockYSize = dset->tilePixels_;
 
     // data type
-    eDataType = dataType( channel["dataType"] );
+    eDataType = dataType(channel["dataType"]);
 
     // color interp
-    colorInterp_ = colorInterp( channel["colorInterp"] );
+    colorInterp_ = colorInterp(channel["colorInterp"]);
 
     // no data value
-    noDataValue_ = noDataValue( channel["noDataValue"] );
+    noDataValue_ = noDataValue(channel["noDataValue"]);
 #endif
 }
 
 GDALColorInterp MapyczRasterBand::GetColorInterpretation() {
 
-    if ( ! colorInterp_ ) return GCI_Undefined;
+    if (!colorInterp_) return GCI_Undefined;
     return *colorInterp_;
 }
 
 
-CPLErr MapyczRasterBand::IReadBlock( int blockCol, int blockRow,
-                                  void * image ) {
+CPLErr MapyczRasterBand::IReadBlock(int blockCol, int blockRow,
+                                  void * image) {
 
     uint offsetX(0), offsetY(0);
-    MapyczDataset * dset = static_cast<MapyczDataset *>( poDS );
+    MapyczDataset * dset = static_cast<MapyczDataset *>(poDS);
 #if 0
     // special case: grid registration, last row/column
-    if ( dset->tileType_ == MapyczDataset::TileType::Grid ) {
+    if (dset->tileType_ == MapyczDataset::TileType::Grid) {
 
-        if ( blockCol == (int) dset->cols_ ) {
+        if (blockCol == (int) dset->cols_) {
             blockCol--; offsetX = dset->tilePixels_ - 1;
         }
 
-        if ( blockRow == (int) dset->rows_ ) {
+        if (blockRow == (int) dset->rows_) {
             blockRow--; offsetY = dset->tilePixels_ - 1;
         }
     }
 #endif
 
     // does tile exist?
-    auto it( dset->tileIndex_.find(
-        MapyczDataset::TileId( blockCol, blockRow ) ) );
+    auto it(dset->tileIndex_.find(
+        MapyczDataset::TileId(blockCol, blockRow)));
 
     // if not, return no data values (or zeros)
-    if ( it == dset->tileIndex_.end() )
-        return readEmptyBlock( image );
+    if (it == dset->tileIndex_.end())
+        return readEmptyBlock(image);
 
     // reference to tile
-    MapyczDataset::TileDesc & tileDesc( it->second );
+    MapyczDataset::TileDesc & tileDesc(it->second);
 
     // open dataset
     GDALDataset * bldset = (GDALDataset *) GDALOpen(
-        ( dset->path_ / tileDesc.path ).string().c_str(), GA_ReadOnly );
+        (dset->path_ / tileDesc.path).string().c_str(), GA_ReadOnly);
 
-    if ( ! bldset )
+    if (!bldset)
         return CE_Failure;
 
-    std::shared_ptr<GDALDataset>  ldset( bldset );
+    std::shared_ptr<GDALDataset>  ldset(bldset);
 
     // sanity
     ut::expect(
         ldset->GetRasterCount() == dset->GetRasterCount() &&
-        ldset->GetRasterBand( nBand )->GetColorInterpretation()
-            == GetColorInterpretation(), "Unexpected inconsistency" );
+        ldset->GetRasterBand(nBand)->GetColorInterpretation()
+            == GetColorInterpretation(), "Unexpected inconsistency");
 
     // ut::expect(
     //     ldset->GetRasterXSize() == (int) dset->tilePixels_
-    //         + ( dset->tileType_ == MapyczDataset::TileType::Grid ? 1 : 0  ) &&
+    //         + (dset->tileType_ == MapyczDataset::TileType::Grid ? 1 : 0 ) &&
     //     ldset->GetRasterYSize() == (int) dset->tilePixels_
-    //         + ( dset->tileType_ == MapyczDataset::TileType::Grid ? 1 : 0  ),
-    //     "Unexpected inconsistency" );
+    //         + (dset->tileType_ == MapyczDataset::TileType::Grid ? 1 : 0 ),
+    //     "Unexpected inconsistency");
 
     // data transfer
-    return readBlock( image, ldset.get(), offsetX, offsetY );
+    return readBlock(image, ldset.get(), offsetX, offsetY);
 }
 
 
-CPLErr MapyczRasterBand::readEmptyBlock( void * image )
+CPLErr MapyczRasterBand::readEmptyBlock(void * image)
 {
-    MapyczDataset * dset = static_cast<MapyczDataset *>( poDS );
+    MapyczDataset * dset = static_cast<MapyczDataset *>(poDS);
 
     double nodata = noDataValue_ ? *noDataValue_ : 0.0;
 
-    if ( eDataType == GDT_Byte ) {
+    if (eDataType == GDT_Byte) {
 
         unsigned char * data = (unsigned char *) image;
-        std::fill( data, data + dset->tilePixels_ * dset->tilePixels_,
-                   static_cast<unsigned char>( nodata ) );
+        std::fill(data, data + dset->tilePixels_ * dset->tilePixels_,
+                   static_cast<unsigned char>(nodata));
         return CE_None;
     }
 
-    if ( eDataType == GDT_UInt16 ) {
+    if (eDataType == GDT_UInt16) {
 
         unsigned short * data = (unsigned short *) image;
-        std::fill( data, data + dset->tilePixels_ * dset->tilePixels_,
-                   static_cast<unsigned short>( nodata ) );
+        std::fill(data, data + dset->tilePixels_ * dset->tilePixels_,
+                   static_cast<unsigned short>(nodata));
         return CE_None;
     }
 
-    if ( eDataType == GDT_Int16 ) {
+    if (eDataType == GDT_Int16) {
 
         short * data = (short *) image;
-        std::fill( data, data + dset->tilePixels_ * dset->tilePixels_,
-                   static_cast<short>( nodata ) );
+        std::fill(data, data + dset->tilePixels_ * dset->tilePixels_,
+                   static_cast<short>(nodata));
         return CE_None;
     }
 
-    if ( eDataType == GDT_UInt32 ) {
+    if (eDataType == GDT_UInt32) {
 
         uint * data = (uint *) image;
-        std::fill( data, data + dset->tilePixels_ * dset->tilePixels_,
-                   static_cast<uint>( nodata ) );
+        std::fill(data, data + dset->tilePixels_ * dset->tilePixels_,
+                   static_cast<uint>(nodata));
         return CE_None;
     }
 
-    if ( eDataType == GDT_Int32 ) {
+    if (eDataType == GDT_Int32) {
 
         int * data = (int *) image;
-        std::fill( data, data + dset->tilePixels_ * dset->tilePixels_,
-                   static_cast<int>( nodata ) );
+        std::fill(data, data + dset->tilePixels_ * dset->tilePixels_,
+                   static_cast<int>(nodata));
         return CE_None;
     }
 
-    if ( eDataType == GDT_Float32 ) {
+    if (eDataType == GDT_Float32) {
 
         float * data = (float *) image;
-        std::fill( data, data + dset->tilePixels_ * dset->tilePixels_,
-                   static_cast<float>( nodata ) );
+        std::fill(data, data + dset->tilePixels_ * dset->tilePixels_,
+                   static_cast<float>(nodata));
         return CE_None;
     }
 
-    if ( eDataType == GDT_Float64 ) {
+    if (eDataType == GDT_Float64) {
 
         double * data = (double *) image;
-        std::fill( data, data + dset->tilePixels_ * dset->tilePixels_,
-                   static_cast<double>( nodata ) );
+        std::fill(data, data + dset->tilePixels_ * dset->tilePixels_,
+                   static_cast<double>(nodata));
         return CE_None;
     }
 
@@ -396,12 +396,12 @@ CPLErr MapyczRasterBand::readEmptyBlock( void * image )
 }
 
 
-CPLErr MapyczRasterBand::readBlock( void * image, GDALDataset * ldset,
-    uint offsetX, uint offsetY ) {
+CPLErr MapyczRasterBand::readBlock(void * image, GDALDataset * ldset,
+    uint offsetX, uint offsetY) {
 
-    MapyczDataset * dset = static_cast<MapyczDataset *>( poDS );
+    MapyczDataset * dset = static_cast<MapyczDataset *>(poDS);
 
-    return( ldset->GetRasterBand(nBand)->RasterIO(
+    return(ldset->GetRasterBand(nBand)->RasterIO(
                     GF_Read,
                     offsetX, offsetY,
                     dset->tilePixels_ - offsetX,
@@ -410,7 +410,7 @@ CPLErr MapyczRasterBand::readBlock( void * image, GDALDataset * ldset,
                     dset->tilePixels_,
                     dset->tilePixels_,
                     eDataType,
-                    0, 0 ) );
+                    0, 0));
 }
 
 } // namespace gdal_drivers
@@ -422,10 +422,10 @@ void GDALRegister_MapyCz()
     if (!GDALGetDriverByName("mapy.cz")) {
         GDALDriver *poDriver = new GDALDriver();
 
-        poDriver->SetDescription( "GTT" );
-        poDriver->SetMetadataItem( GDAL_DMD_LONGNAME,
-                                   "GeoTIFF tiles" );
-        poDriver->SetMetadataItem( GDAL_DMD_EXTENSION, "" );
+        poDriver->SetDescription("mapy.cz");
+        poDriver->SetMetadataItem(GDAL_DMD_LONGNAME,
+                                   "GeoTIFF tiles");
+        poDriver->SetMetadataItem(GDAL_DMD_EXTENSION, "");
 
         poDriver->pfnOpen = gdal_drivers::MapyczDataset::Open;
 

@@ -16,6 +16,7 @@
 #include "utility/uri.hpp"
 #include "utility/path.hpp"
 #include "geo/srsdef.hpp"
+#include "imgproc/readimage.hpp"
 
 #include "./mapy-cz.hpp"
 
@@ -218,7 +219,7 @@ cv::Mat fetchTile(::CURL *curl, const std::string &url)
             << url << ">: Unexpected HTTP status code: <" << httpCode << ">.";
     }
 
-    auto image(cv::imdecode(buffer, CV_LOAD_IMAGE_COLOR));
+    auto image(imgproc::readImage(buffer.data(), buffer.size()));
     if (!image.data) {
         LOGTHROW(err2, std::runtime_error)
             << "Failed to decode tile data downloaded from <"

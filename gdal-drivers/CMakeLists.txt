@@ -1,4 +1,4 @@
-define_module(LIBRARY gdal-drivers DEPENDS geo jsoncpp CURL GIF)
+define_module(LIBRARY gdal-drivers DEPENDS geo jsoncpp CURL)
 
 set(gdal-drivers_SOURCES
   register.hpp register.cpp

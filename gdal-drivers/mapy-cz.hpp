@@ -10,19 +10,27 @@
  *    * ZOOM is a level-of-detail specifier in range 0-20
  */
 
+#ifndef gdal_drivers_mapy_cz_hpp_included_
+#define gdal_drivers_mapy_cz_hpp_included_
 
 #include <gdal_priv.h>
 
 #include <map>
+
 #include <boost/filesystem/path.hpp>
 #include <boost/optional.hpp>
 
+#include <opencv2/core/core.hpp>
+
+#include <curl/curl.h>
+
 #include "math/geometry_core.hpp"
-#include "geo/srsdef.hpp"
 
 namespace fs = boost::filesystem;
 
 namespace gdal_drivers {
+
+typedef std::shared_ptr< ::CURL> Curl;
 
 class MapyczRasterBand;
 
@@ -43,39 +51,25 @@ public:
     virtual const char *GetProjectionRef();
 
 private:
-    MapyczDataset();
+    MapyczDataset(const std::string &mapType, int zoom);
 
-    struct TileId {
-        uint x,y;
+    const cv::Mat& getTile(const math::Point2i &tile);
 
-        TileId() : x(), y() {}
+    const std::string mapType_;
+    int zoom_;
 
-        TileId(uint x, uint y) : x(x), y(y) {}
+    /** Pixel size in meters.
+     */
+    math::Size2f pixelSize_;
 
-        bool operator<(const TileId &op) const {
-            return (x < op.x) || ((x == op.x) && (y < op.y));
-        }
-    };
+    /** Tile size in PP units.
+     */
+    math::Size2_<long> tileSize_;
 
-    struct TileDesc {
-        fs::path path;
-        math::Extents2 extents;
+    Curl curl_;
 
-        TileDesc() : path(), extents() {}
-
-        TileDesc(const fs::path &path
-                 , double llx, double lly, double urx, double ury)
-            : path(path), extents(llx, lly, urx, ury) {}
-    };
-
-    fs::path path_;
-    uint tilePixels_;
-    double tileUnits_;
-    math::Point2 alignment_;
-    std::map<TileId,TileDesc> tileIndex_;
-    math::Extents2 extents_;
-    uint cols_, rows_;
-    geo::SrsDefinition srs_, srsWkt_;
+    math::Point2i lastTile_;
+    cv::Mat lastTileImage_;
 };
 
 /**
@@ -87,23 +81,20 @@ class MapyczRasterBand : public GDALRasterBand
 
 public:
     MapyczRasterBand(MapyczDataset *dset, int numBand
-                     , int channel);
-
-    virtual double GetNoDataValue(int *success = nullptr);
-    virtual GDALColorInterp GetColorInterpretation();
+                     , int cvChannel
+                     , GDALColorInterp colorInterp);
 
     virtual CPLErr IReadBlock(int blockCol, int blockRow, void *image);
 
     virtual ~MapyczRasterBand() {};
 
+    virtual GDALColorInterp GetColorInterpretation() {
+        return colorInterp_;
+    }
+
 private:
-    boost::optional<double> noDataValue_;
-    boost::optional<GDALColorInterp> colorInterp_;
-
-    CPLErr readEmptyBlock(void *image);
-    CPLErr readBlock(void *image, GDALDataset *ldset
-                     , uint offsetX, uint offsetY);
-
+    int cvChannel_;
+    GDALColorInterp colorInterp_;
 };
 
 } // namespace gdal_drivers
@@ -113,3 +104,5 @@ private:
 CPL_C_START
 void GDALRegister_MapyCz(void);
 CPL_C_END
+
+#endif // gdal_drivers_mapy_cz_hpp_included_

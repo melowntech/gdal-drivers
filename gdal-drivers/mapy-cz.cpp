@@ -5,412 +5,294 @@
 #include <limits>
 #include <algorithm>
 #include <vector>
-#include <boost/lexical_cast.hpp>
+#include <iterator>
 
-#include "utility/parse.hpp"
-#include "utility/expect.hpp"
-#include "utility/raise.hpp"
+#include <boost/lexical_cast.hpp>
+#include <boost/format.hpp>
+
+#include <opencv2/highgui/highgui.hpp>
+
 #include "dbglog/dbglog.hpp"
-#include "geo/geodataset.hpp"
+#include "utility/uri.hpp"
+#include "utility/path.hpp"
+#include "geo/srsdef.hpp"
 
 #include "./mapy-cz.hpp"
 
 namespace gdal_drivers {
 
+namespace {
 
-namespace ut = utility;
+namespace def {
+    // media URL
+    const std::string MediaUrl("http://m1.mapserver.mapy.cz/%s/%i_%07x_%07x");
+    // fake referer to not to look so suspicious in the Seznam.cz log :)
+    const std::string RefererUrl("http://mapy.cz/");
+
+    const std::string Schema("mapycz");
+    const std::string DefaultMapType("ophoto");
+
+    const math::Size2i TileSize(256, 256);
+    const math::Extents2 PPExtents(-3700000.0, 1300000.0
+                                   , -3700000.0 + (1 << 23)
+                                   , 1300000.0 + (1 << 23));
+
+    geo::SrsDefinition Srs("+proj=utm +zone=33 +ellps=WGS84 +datum=WGS84");
+} // namespace constants
+
+std::string makeUrl(const std::string mapType, int zoom, long x, long y)
+{
+    return str(boost::format(def::MediaUrl) % mapType % zoom % x % y);
+}
+
+Curl createCurl()
+{
+    auto c(::curl_easy_init());
+    if (!c) {
+        LOGTHROW(err2, std::runtime_error) << "Failed to create CURL handle.";
+    }
+
+    return Curl(c, [](CURL *c) { if (c) { ::curl_easy_cleanup(c); } });
+}
+
+} // namespace
 
 /* class MapyczDataset */
 
-GDALDataset* MapyczDataset::Open(GDALOpenInfo* openInfo)
+GDALDataset* MapyczDataset::Open(GDALOpenInfo *openInfo)
 {
-    (void) openInfo;
+    // parse path
+    auto uri(utility::parseUri(openInfo->pszFilename));
 
-    GDALDataset *dset(nullptr);
-    // parse filename
-#if 0
-    fs::path path(openInfo->pszFilename);
+    // check schema
+    if (uri.schema != def::Schema) { return nullptr; }
 
-    // check whether filename is a directory
-    if (!openInfo->bIsDirectory) {
-        // skip driver
-        return 0x0;
-    }
+    // get map type (from uri host, with fallback to default map type
+    auto mapType(uri.host.empty() ? def::DefaultMapType : uri.host);
 
-    // look for configuration file
-    std::ifstream f;
-    f.exceptions(std::ios::badbit | std::ios::failbit);
-
+    // parse zoom
+    int zoom;
     try {
-
-        f.open((path / "gtt_config.json").string(), std::ios_base::in);
-        f.exceptions(std::ios::badbit);
-
-    } catch (std::ifstream::failure) {
-
-        // skip driver
-        return 0x0;
-    }
-
-    // ok, we take ownership, no silent skipping from now on
-
-    // no updates
-    if(openInfo->eAccess == GA_Update) {
-
-        CPLError(CE_Failure, CPLE_NotSupported,
-                  "The JDEM driver does not support update access to existing"
-                  " datasets.\n");
-        return 0x0;
-    }
-
-    // read configuration file
-    try {
-
-        Json::Reader reader;
-
-        if (!reader.parse(f, config)) {
-
-            CPLError(CE_Failure, CPLE_IllegalArg,
-                      "Failed to parse GTT configuration file (%s).\n",
-                      reader.getFormatedErrorMessages().c_str());
-            return 0x0;
-        }
-
-        f.close();
-
-    } catch (std::exception &) {
-
-        CPLError(CE_Failure, CPLE_FileIO, "Unable to read GTT config_file.\n");
-        return 0x0;
-    }
-
-    // check for tile index
-    fs::path tileIndexPath = path / "gtt_index.csv";
-
-    if (!exists(tileIndexPath)) {
-        // TODO: catch error
-        try {
-            buildIndex(path, tileIndexPath, config);
-        } catch (const std::exception &e) {
-            CPLError(CE_Failure, CPLE_FileIO
-                     , "Unable to build GTT tile index: <%s>.\n"
-                     , e.what());
-            return nullptr;
-        }
-    }
-
-    // read tile index
-    std::vector<std::vector<std::string> > tileIndex;
-
-    try {
-
-        ut::separated_values::parse(tileIndexPath, ",",
-            [&](const std::vector<std::string> & values) {
-                tileIndex.emplace_back(values);
-            });
-
-    }  catch (const std::exception & e) {
-
-        CPLError(CE_Failure, CPLE_IllegalArg
-                  , "Could not parse GTT tile index: <%s>.\n"
-                  , e.what());
+        auto zc(utility::pathComponent(uri.path, 1));
+        if (!zc) { return nullptr; }
+        zoom  = boost::lexical_cast<int>(zc->string());
+    } catch (const boost::bad_lexical_cast&) {
         return nullptr;
     }
+    LOG(debug) << "zoom: " << zoom;
 
+    // no updates
+    if (openInfo->eAccess == GA_Update) {
+        CPLError(CE_Failure, CPLE_NotSupported,
+                 "The MapyCz driver does not support update access to existing"
+                 " datasets (you know, Seznam.cz would not be happy"
+                 " otherwise).\n");
+        return 0x0;
+    }
 
     // initialize dataset
     try {
-
-        dset = new MapyczDataset(path, config, tileIndex);
-
-    } catch (std::runtime_error & e) {
-
-        CPLError(CE_Failure, CPLE_IllegalArg,
-            "Dataset initialization failure (%s).\n", e.what());
+        return new MapyczDataset(mapType, zoom);
+    } catch (const std::runtime_error & e) {
+        CPLError(CE_Failure, CPLE_IllegalArg
+                 , "Dataset initialization failure (%s).\n", e.what());
         return nullptr;
     }
-
-    // all done
-    return dset;
-#endif
-    return dset;
 }
 
 
-MapyczDataset::MapyczDataset()
+MapyczDataset::MapyczDataset(const std::string &mapType, int zoom)
+    : mapType_(mapType), zoom_(zoom)
+    , pixelSize_(std::pow(2.0, 15 - zoom), std::pow(2.0, 15 - zoom))
+    , tileSize_((1 << (28 - zoom)), 1 << (28 - zoom))
+    , curl_(createCurl()), lastTile_(-1, -1)
 {
-#if 0
-    srsWkt_ = srs_.as(geo::SrsDefinition::Type::wkt);
+    // calculate size of raster in pixels
+    nRasterXSize = (def::TileSize.width << zoom);
+    nRasterYSize = (def::TileSize.height << zoom);
 
-    // process tile index
-    cols_ = 0; rows_ = 0;
-
-    for (std::vector<std::string> tileinfo : tileIndex) {
-
-        TileId tileId;
-        TileDesc tileDesc;
-
-        try {
-
-            tileId = TileId(
-                boost::lexical_cast<uint>(tileinfo[0]),
-                boost::lexical_cast<uint>(tileinfo[1]));
-
-            tileDesc = TileDesc(
-                tileinfo[2],
-                boost::lexical_cast<double>(tileinfo[3]),
-                boost::lexical_cast<double>(tileinfo[4]),
-                boost::lexical_cast<double>(tileinfo[5]),
-                boost::lexical_cast<double>(tileinfo[6]));
-
-        } catch (boost::bad_lexical_cast & e) {
-            utility::raise<std::runtime_error>
-                ("Invalid format: <%s>.", e.what());
-        }
-
-        tileIndex_[ tileId ] = tileDesc;
-
-        if (empty(extents_)) {
-            extents_ = tileDesc.extents;
-        } else {
-            extents_  = unite(extents_, tileDesc.extents);
-        }
-
-        cols_ = std::max(cols_, tileId.x + 1);
-        rows_ = std::max(rows_, tileId.y + 1);
+    int index(1);
+    int cvChannel(2);
+    for (auto colorInterp : { GCI_RedBand, GCI_GreenBand, GCI_BlueBand }) {
+        SetBand(index, new MapyczRasterBand
+                (this, index, cvChannel, colorInterp));
+        ++index;
+        --cvChannel;
     }
-
-    // raster size
-    if (tileType_ == TileType::Grid) {
-
-        // grid registration
-        nRasterXSize = cols_ * tilePixels_ + 1;
-        nRasterYSize = rows_ * tilePixels_ + 1;
-
-        extents_.ur[0] += 0.5 * tileUnits_ / tilePixels_;
-        extents_.ur[1] += 0.5 * tileUnits_ / tilePixels_;
-
-        extents_.ll[0] = extents_.ur[0] - cols_ * tileUnits_
-            - tileUnits_ / tilePixels_;
-        extents_.ll[1] = extents_.ur[1] - rows_ * tileUnits_
-            - tileUnits_ / tilePixels_;
-
-    } else {
-
-        // pixel registration
-        nRasterXSize = cols_ * tilePixels_;
-        nRasterYSize = rows_ * tilePixels_;
-
-        extents_.ll[0] = extents_.ur[0] - cols_ * tileUnits_;
-        extents_.ll[1] = extents_.ur[1] - rows_ * tileUnits_;
-    }
-
-    // set up channels
-    try {
-
-        // channels
-        Json::Value channels = config["channels"];
-
-        for (uint i = 1; i <= channels.size(); i++) {
-
-            SetBand(i, new MapyczRasterBand(this, i, channels[i-1]));
-        }
-
-    } catch (const Json::Error & e ) {
-        utility::raise<std::runtime_error>("Invalid format: <%s>.", e.what());
-    }
-
-    // done
-#endif
 }
 
-CPLErr MapyczDataset::GetGeoTransform(double * padfTransform) {
+CPLErr MapyczDataset::GetGeoTransform(double *padfTransform) {
 
-    padfTransform[0] = extents_.ll[0];
-    padfTransform[1] = tileUnits_ / tilePixels_;
+    padfTransform[0] = def::PPExtents.ll[0];
+    padfTransform[1] = pixelSize_.width;
     padfTransform[2] = 0.0;
 
-    padfTransform[3] = extents_.ur[1];
+    padfTransform[3] = def::PPExtents.ur[1];
     padfTransform[4] = 0.0;
-    padfTransform[5] = - tileUnits_ / tilePixels_;
+    padfTransform[5] = -pixelSize_.height;
 
     return CE_None;
 }
 
-const char * MapyczDataset::GetProjectionRef() {
+const char* MapyczDataset::GetProjectionRef()
+{
+    return def::Srs.as(geo::SrsDefinition::Type::wkt).c_str();
+}
 
-    return srsWkt_.srs.c_str();
+extern "C" {
+
+typedef std::vector<char> Buffer;
+
+size_t gdal_drivers_mapy_cz_write(char *ptr, size_t size, size_t nmemb
+                                  , void *userdata)
+{
+    auto &buffer(*static_cast<Buffer*>(userdata));
+    auto bytes(size * nmemb);
+    std::copy(ptr, ptr + bytes, std::back_inserter(buffer));
+    return bytes;
+}
+
+} // extern "C"
+
+namespace {
+cv::Mat fetchTile(::CURL *curl, const std::string &url)
+{
+    LOG(info1) << "Fetching tile from <" << url << ">";
+
+#define CHECK_CURL_STATUS(what)                                         \
+    do {                                                                \
+        auto res(what);                                                 \
+        if (res != CURLE_OK) {                                          \
+            LOGTHROW(err2, std::runtime_error)                          \
+                << "Failed to download tile from <"                     \
+                << url << ">: <" << res << ", "                         \
+                << ::curl_easy_strerror(res)                            \
+                << ">.";                                                \
+        }                                                               \
+    } while (0)
+
+    // we are getting a resource
+    CHECK_CURL_STATUS(::curl_easy_setopt(curl, CURLOPT_HTTPGET, 1L));
+
+    // HTTP/1.1
+    CHECK_CURL_STATUS(::curl_easy_setopt(curl, CURLOPT_HTTP_VERSION
+                                         , CURL_HTTP_VERSION_1_1));
+    // target url
+    CHECK_CURL_STATUS(::curl_easy_setopt(curl, CURLOPT_URL, url.c_str()));
+
+    // do not follow redirects -> we can detect non-existent tiles
+    CHECK_CURL_STATUS(::curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 0L));
+
+    // set referer ;)
+    CHECK_CURL_STATUS(::curl_easy_setopt
+                      (curl, CURLOPT_REFERER, def::RefererUrl.c_str()));
+
+    // image buffer
+    Buffer buffer;
+
+    // set output function + userdata
+    CHECK_CURL_STATUS(::curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION
+                                         , &gdal_drivers_mapy_cz_write));
+    CHECK_CURL_STATUS(::curl_easy_setopt(curl, CURLOPT_WRITEDATA, &buffer));
+
+    /// do the thing
+    CHECK_CURL_STATUS(::curl_easy_perform(curl));
+
+    // check status code:
+    long int httpCode(0);
+    CHECK_CURL_STATUS(::curl_easy_getinfo
+                      (curl, CURLINFO_RESPONSE_CODE, &httpCode));
+
+    if (httpCode == 302) {
+        // TODO: check redirect location
+        // no imagery for this tile -> return black one
+        cv::Mat black(def::TileSize.height, def::TileSize.width
+                      , CV_8UC3);
+        black = cv::Scalar(0, 0, 0);
+        return black;
+    }
+
+    if (httpCode != 200) {
+        LOGTHROW(err2, std::runtime_error)
+            << "Failed to download tile data from <"
+            << url << ">: Unexpected HTTP status code: <" << httpCode << ">.";
+    }
+
+    auto image(cv::imdecode(buffer, CV_LOAD_IMAGE_COLOR));
+    if (!image.data) {
+        LOGTHROW(err2, std::runtime_error)
+            << "Failed to decode tile data downloaded from <"
+            << url << ">.";
+    }
+
+    if ((image.cols != def::TileSize.width)
+        || (image.rows != def::TileSize.height))
+    {
+        LOGTHROW(err2, std::runtime_error)
+            << "Tile downloaded from from <"
+            << url << "> has wrong dimensions: "
+            << image.cols << "x" << image.rows << " (should be "
+            << def::TileSize << ").";
+    }
+
+#undef CHECK_CURL_STATUS
+
+    return image;
+}
+
+} // namespace
+
+const cv::Mat& MapyczDataset::getTile(const math::Point2i &tile)
+{
+    if (lastTileImage_.data && (tile == lastTile_)) {
+        // tile cached
+        return lastTileImage_;
+    }
+
+    auto url(makeUrl(mapType_, zoom_, tile(0) * tileSize_.width
+                     , (1 << 28) - ((tile(1) + 1) * tileSize_.height)));
+
+    auto image(fetchTile(curl_.get(), url));
+
+    // remember
+    lastTileImage_ = image;
+    lastTile_ = tile;
+
+    // done
+    return lastTileImage_;
 }
 
 /* MapyczRasterBand */
 
-MapyczRasterBand::MapyczRasterBand(MapyczDataset * dset, int numBand
-                                    , int channel)
+MapyczRasterBand::MapyczRasterBand(MapyczDataset *dset, int numBand
+                                   , int cvChannel
+                                   , GDALColorInterp colorInterp)
+    : cvChannel_(cvChannel), colorInterp_(colorInterp)
 {
-    (void) dset; (void) numBand; (void) channel;
-#if 0
-    // dset, nband
-    poDS = dset; nBand = numBand;
-
-    // block size
-    nBlockXSize = nBlockYSize = dset->tilePixels_;
-
-    // data type
-    eDataType = dataType(channel["dataType"]);
-
-    // color interp
-    colorInterp_ = colorInterp(channel["colorInterp"]);
-
-    // no data value
-    noDataValue_ = noDataValue(channel["noDataValue"]);
-#endif
+    poDS = dset;
+    nBand = numBand;
+    nBlockXSize = def::TileSize.width;
+    nBlockYSize = def::TileSize.height;
+    eDataType = GDT_Byte;
 }
 
-GDALColorInterp MapyczRasterBand::GetColorInterpretation() {
+CPLErr MapyczRasterBand::IReadBlock(int blockCol, int blockRow
+                                    , void *rawImage)
+{
+    auto &dset(*static_cast<MapyczDataset*>(poDS));
 
-    if (!colorInterp_) return GCI_Undefined;
-    return *colorInterp_;
-}
+    try {
+        cv::Mat tile[1] = { dset.getTile({blockCol, blockRow}) };
+        cv::Mat image[1]
+        {{def::TileSize.height, def::TileSize.width, CV_8UC1, rawImage}};
 
-
-CPLErr MapyczRasterBand::IReadBlock(int blockCol, int blockRow,
-                                  void * image) {
-
-    uint offsetX(0), offsetY(0);
-    MapyczDataset * dset = static_cast<MapyczDataset *>(poDS);
-#if 0
-    // special case: grid registration, last row/column
-    if (dset->tileType_ == MapyczDataset::TileType::Grid) {
-
-        if (blockCol == (int) dset->cols_) {
-            blockCol--; offsetX = dset->tilePixels_ - 1;
-        }
-
-        if (blockRow == (int) dset->rows_) {
-            blockRow--; offsetY = dset->tilePixels_ - 1;
-        }
-    }
-#endif
-
-    // does tile exist?
-    auto it(dset->tileIndex_.find(
-        MapyczDataset::TileId(blockCol, blockRow)));
-
-    // if not, return no data values (or zeros)
-    if (it == dset->tileIndex_.end())
-        return readEmptyBlock(image);
-
-    // reference to tile
-    MapyczDataset::TileDesc & tileDesc(it->second);
-
-    // open dataset
-    GDALDataset * bldset = (GDALDataset *) GDALOpen(
-        (dset->path_ / tileDesc.path).string().c_str(), GA_ReadOnly);
-
-    if (!bldset)
+        int fromTo[2] = { cvChannel_, 0 };
+        cv::mixChannels({ tile }, 1, image, 1, fromTo, 1);
+    } catch (const std::exception &e) {
+        CPLError(CE_Failure, CPLE_FileIO, "%s\n", e.what());
         return CE_Failure;
-
-    std::shared_ptr<GDALDataset>  ldset(bldset);
-
-    // sanity
-    ut::expect(
-        ldset->GetRasterCount() == dset->GetRasterCount() &&
-        ldset->GetRasterBand(nBand)->GetColorInterpretation()
-            == GetColorInterpretation(), "Unexpected inconsistency");
-
-    // ut::expect(
-    //     ldset->GetRasterXSize() == (int) dset->tilePixels_
-    //         + (dset->tileType_ == MapyczDataset::TileType::Grid ? 1 : 0 ) &&
-    //     ldset->GetRasterYSize() == (int) dset->tilePixels_
-    //         + (dset->tileType_ == MapyczDataset::TileType::Grid ? 1 : 0 ),
-    //     "Unexpected inconsistency");
-
-    // data transfer
-    return readBlock(image, ldset.get(), offsetX, offsetY);
-}
-
-
-CPLErr MapyczRasterBand::readEmptyBlock(void * image)
-{
-    MapyczDataset * dset = static_cast<MapyczDataset *>(poDS);
-
-    double nodata = noDataValue_ ? *noDataValue_ : 0.0;
-
-    if (eDataType == GDT_Byte) {
-
-        unsigned char * data = (unsigned char *) image;
-        std::fill(data, data + dset->tilePixels_ * dset->tilePixels_,
-                   static_cast<unsigned char>(nodata));
-        return CE_None;
     }
-
-    if (eDataType == GDT_UInt16) {
-
-        unsigned short * data = (unsigned short *) image;
-        std::fill(data, data + dset->tilePixels_ * dset->tilePixels_,
-                   static_cast<unsigned short>(nodata));
-        return CE_None;
-    }
-
-    if (eDataType == GDT_Int16) {
-
-        short * data = (short *) image;
-        std::fill(data, data + dset->tilePixels_ * dset->tilePixels_,
-                   static_cast<short>(nodata));
-        return CE_None;
-    }
-
-    if (eDataType == GDT_UInt32) {
-
-        uint * data = (uint *) image;
-        std::fill(data, data + dset->tilePixels_ * dset->tilePixels_,
-                   static_cast<uint>(nodata));
-        return CE_None;
-    }
-
-    if (eDataType == GDT_Int32) {
-
-        int * data = (int *) image;
-        std::fill(data, data + dset->tilePixels_ * dset->tilePixels_,
-                   static_cast<int>(nodata));
-        return CE_None;
-    }
-
-    if (eDataType == GDT_Float32) {
-
-        float * data = (float *) image;
-        std::fill(data, data + dset->tilePixels_ * dset->tilePixels_,
-                   static_cast<float>(nodata));
-        return CE_None;
-    }
-
-    if (eDataType == GDT_Float64) {
-
-        double * data = (double *) image;
-        std::fill(data, data + dset->tilePixels_ * dset->tilePixels_,
-                   static_cast<double>(nodata));
-        return CE_None;
-    }
-
-    return CE_Failure;
-}
-
-
-CPLErr MapyczRasterBand::readBlock(void * image, GDALDataset * ldset,
-    uint offsetX, uint offsetY) {
-
-    MapyczDataset * dset = static_cast<MapyczDataset *>(poDS);
-
-    return(ldset->GetRasterBand(nBand)->RasterIO(
-                    GF_Read,
-                    offsetX, offsetY,
-                    dset->tilePixels_ - offsetX,
-                    dset->tilePixels_ - offsetY,
-                    (void *) image,
-                    dset->tilePixels_,
-                    dset->tilePixels_,
-                    eDataType,
-                    0, 0));
+    return CE_None;
 }
 
 } // namespace gdal_drivers
@@ -420,15 +302,15 @@ CPLErr MapyczRasterBand::readBlock(void * image, GDALDataset * ldset,
 void GDALRegister_MapyCz()
 {
     if (!GDALGetDriverByName("mapy.cz")) {
-        GDALDriver *poDriver = new GDALDriver();
+        std::unique_ptr<GDALDriver> driver(new GDALDriver());
 
-        poDriver->SetDescription("mapy.cz");
-        poDriver->SetMetadataItem(GDAL_DMD_LONGNAME,
-                                   "GeoTIFF tiles");
-        poDriver->SetMetadataItem(GDAL_DMD_EXTENSION, "");
+        driver->SetDescription("mapy.cz");
+        driver->SetMetadataItem(GDAL_DMD_LONGNAME
+                                , "Mapy.cz map layer support.");
+        driver->SetMetadataItem(GDAL_DMD_EXTENSION, "");
 
-        poDriver->pfnOpen = gdal_drivers::MapyczDataset::Open;
+        driver->pfnOpen = gdal_drivers::MapyczDataset::Open;
 
-        GetGDALDriverManager()->RegisterDriver(poDriver);
+        GetGDALDriverManager()->RegisterDriver(driver.release());
     }
 }

@@ -10,8 +10,12 @@
  * are supported. The tiles have to be georeferenced, the directory in which
  * they are present needs to be writable and, most importantly, a configuration
  * file named gtt_config.json needs to be present.
+ *
+ * Pulled in gdal_drivers by Vaclav Blazek <vaclav.blazek@citationtech.net>
  */
 
+#ifndef gdal_drivers_gttdataset_hpp_included_
+#define gdal_drivers_gttdataset_hpp_included_
 
 #include <gdal_priv.h>
 
@@ -133,3 +137,5 @@ UTILITY_GENERATE_ENUM_IO(GttDataset::TileType,
 CPL_C_START
 void GDALRegister_Gtt(void);
 CPL_C_END
+
+#endif // gdal_drivers_gttdataset_hpp_included_

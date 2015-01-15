@@ -1,8 +1,9 @@
-define_module(LIBRARY gdal-drivers DEPENDS geo jsoncpp)
+define_module(LIBRARY gdal-drivers DEPENDS geo jsoncpp CURL)
 
 set(gdal-drivers_SOURCES
-  gttdataset.hpp gttdataset.cpp
+  register.hpp register.cpp
 
+  gttdataset.hpp gttdataset.cpp
   mapy-cz.hpp mapy-cz.cpp
 )
 

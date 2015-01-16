@@ -2,7 +2,7 @@
  * mapy-cz.cpp
  */
 
-#include <limits>
+#include <cstdlib>
 #include <algorithm>
 #include <vector>
 #include <iterator>
@@ -39,6 +39,8 @@ namespace def {
                                    , 1300000.0 + (1 << 23));
 
     geo::SrsDefinition Srs("+proj=utm +zone=33 +ellps=WGS84 +datum=WGS84");
+
+    const char *ProxyEnv("MAPYCZ_PROXY");
 } // namespace constants
 
 std::string makeUrl(const std::string mapType, int zoom, long x, long y)
@@ -104,6 +106,7 @@ GDALDataset* MapyczDataset::Open(GDALOpenInfo *openInfo)
 
 MapyczDataset::MapyczDataset(const std::string &mapType, int zoom)
     : mapType_(mapType), zoom_(zoom)
+    , srs_(def::Srs.as(geo::SrsDefinition::Type::wkt).srs)
     , pixelSize_(std::pow(2.0, 15 - zoom), std::pow(2.0, 15 - zoom))
     , tileSize_((1 << (28 - zoom)), 1 << (28 - zoom))
     , curl_(createCurl()), lastTile_(-1, -1)
@@ -137,7 +140,7 @@ CPLErr MapyczDataset::GetGeoTransform(double *padfTransform) {
 
 const char* MapyczDataset::GetProjectionRef()
 {
-    return def::Srs.as(geo::SrsDefinition::Type::wkt).c_str();
+    return srs_.c_str();
 }
 
 extern "C" {
@@ -187,6 +190,12 @@ cv::Mat fetchTile(::CURL *curl, const std::string &url)
     // set referer ;)
     CHECK_CURL_STATUS(::curl_easy_setopt
                       (curl, CURLOPT_REFERER, def::RefererUrl.c_str()));
+
+    // use proxy if set in environment
+    if (const char *proxy = std::getenv(def::ProxyEnv)) {
+        LOG(info1) << "Using proxy server at <" << proxy << ">.";
+        CHECK_CURL_STATUS(::curl_easy_setopt(curl, CURLOPT_PROXY, proxy));
+    }
 
     // image buffer
     Buffer buffer;

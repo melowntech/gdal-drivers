@@ -58,6 +58,8 @@ private:
     const std::string mapType_;
     int zoom_;
 
+    std::string srs_;
+
     /** Pixel size in meters.
      */
     math::Size2f pixelSize_;

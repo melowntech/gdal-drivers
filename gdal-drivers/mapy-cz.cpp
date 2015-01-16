@@ -55,6 +55,9 @@ Curl createCurl()
         LOGTHROW(err2, std::runtime_error) << "Failed to create CURL handle.";
     }
 
+    // switch off SIGALARM
+    ::curl_easy_setopt(c, CURLOPT_NOSIGNAL, 1);
+
     return Curl(c, [](CURL *c) { if (c) { ::curl_easy_cleanup(c); } });
 }
 

@@ -215,12 +215,15 @@ cv::Mat fetchTile(::CURL *curl, const std::string &url)
     long int httpCode(0);
     CHECK_CURL_STATUS(::curl_easy_getinfo
                       (curl, CURLINFO_RESPONSE_CODE, &httpCode));
+#undef CHECK_CURL_STATUS
 
     if (httpCode == 302) {
         // TODO: check redirect location
         // no imagery for this tile -> return black one
         cv::Mat black(def::TileSize.height, def::TileSize.width
                       , CV_8UC3);
+        // all pixels with all channels = 0 -> no content since 0 is no data
+        // value
         black = cv::Scalar(0, 0, 0);
         return black;
     }
@@ -248,7 +251,17 @@ cv::Mat fetchTile(::CURL *curl, const std::string &url)
             << def::TileSize << ").";
     }
 
-#undef CHECK_CURL_STATUS
+    // convert 0 to 1 to prevent interpretation as no-data value
+    {
+        auto src(static_cast<unsigned char*>(image.data));
+        std::size_t width(image.cols * image.channels());
+        for (std::size_t y(0); y < std::size_t(image.rows); ++y) {
+            auto *sdata(src + image.step * y);
+            for (std::size_t x(0); x < width; ++x, ++sdata) {
+                if (!*sdata) { *sdata = 1; }
+            }
+        }
+    }
 
     return image;
 }

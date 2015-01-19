@@ -90,9 +90,15 @@ public:
 
     virtual ~MapyczRasterBand() {};
 
-    virtual GDALColorInterp GetColorInterpretation() {
-        return colorInterp_;
+    /** 0 is special marker for no-data pixels
+     * NB: all valid pixels with 0 in original data are changed to 1 internally
+     */
+    virtual double GetNoDataValue(int *success = nullptr) {
+        if (success) { *success = 1; }
+        return 0.0;
     }
+
+    virtual GDALColorInterp GetColorInterpretation() { return colorInterp_; }
 
 private:
     int cvChannel_;

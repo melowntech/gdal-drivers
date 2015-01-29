@@ -115,11 +115,11 @@ public:
 
 private:
     boost::optional<double> noDataValue_;
+    boost::optional<double> defaultValue_;
     boost::optional<GDALColorInterp> colorInterp_;
 
     static GDALDataType dataType( const Json::Value & value );
     static boost::optional<GDALColorInterp> colorInterp( const Json::Value & value );
-    static boost::optional<double> noDataValue( const Json::Value & value );
     CPLErr readEmptyBlock( void * image );
     CPLErr readBlock( void * image, GDALDataset * ldset,
         uint offsetX, uint offsetY );

@@ -431,6 +431,18 @@ const char * GttDataset::GetProjectionRef() {
 }
 
 /* GttRasterBand */
+namespace {
+
+boost::optional<double> asOptionalDouble(const Json::Value &value)
+{
+    if (value.isNull()) {
+        return boost::none;
+    }
+
+    return value.asDouble();
+}
+
+} // namespace
 
 GttRasterBand::GttRasterBand( GttDataset * dset, int numBand,
     const Json::Value & channel ) {
@@ -448,8 +460,9 @@ GttRasterBand::GttRasterBand( GttDataset * dset, int numBand,
     colorInterp_ = colorInterp( channel["colorInterp"] );
 
     // no data value
-    noDataValue_ = noDataValue( channel["noDataValue"] );
+    noDataValue_ = asOptionalDouble( channel["noDataValue"] );
 
+    defaultValue_ = asOptionalDouble(channel["defaultValue"]);
 
     /*
     LOG( debug ) << poBlocks;
@@ -492,13 +505,6 @@ boost::optional<GDALColorInterp> GttRasterBand::colorInterp(
     throw std::runtime_error( "unknown color interpretation for channel" );
 }
 
-
-boost::optional<double> GttRasterBand::noDataValue( const Json::Value & value ) {
-
-    if ( value.isNull() ) return boost::none;
-
-    return value.asDouble();
-}
 
 double GttRasterBand::GetNoDataValue( int * success ) {
 
@@ -579,7 +585,14 @@ CPLErr GttRasterBand::readEmptyBlock( void * image )
 {
     GttDataset * dset = static_cast<GttDataset *>( poDS );
 
-    double nodata = noDataValue_ ? *noDataValue_ : 0.0;
+    // generate band full of: defaultValue if set; otherwise noDataValue if set;
+    // and finally use 0 as a fallback
+    double nodata(0.0);
+    if (defaultValue_) {
+        nodata = *defaultValue_;
+    } else if (noDataValue_) {
+        nodata = *noDataValue_;
+    }
 
     if ( eDataType == GDT_Byte ) {
 

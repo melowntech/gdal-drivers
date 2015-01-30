@@ -126,6 +126,21 @@ MapyczDataset::MapyczDataset(const std::string &mapType, int zoom)
         ++index;
         --cvChannel;
     }
+
+    // set some useful information into metadata
+    SetMetadataItem("ZOOM"
+                    , boost::lexical_cast<std::string>(zoom_).c_str()
+                    , "MAPYCZ");
+
+    SetMetadataItem("TILE_GEO_WIDTH"
+                    , boost::lexical_cast<std::string>
+                    (1 << (23 - zoom_)).c_str()
+                    , "MAPYCZ");
+
+    SetMetadataItem("TILE_GEO_HEIGHT"
+                    , boost::lexical_cast<std::string>
+                    (1 << (23 - zoom_)).c_str()
+                    , "MAPYCZ");
 }
 
 CPLErr MapyczDataset::GetGeoTransform(double *padfTransform) {

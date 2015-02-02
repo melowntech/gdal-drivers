@@ -87,6 +87,23 @@ GDALDataset* MapyczDataset::Open(GDALOpenInfo *openInfo)
     }
     LOG(debug) << "zoom: " << zoom;
 
+    // modifiers
+    unsigned int flags(Flag::none);
+    unsigned int index(0);
+    for (const auto &c : fs::path(uri.path)) {
+        // skip root and zoom
+        if (index++ < 2) { continue; }
+
+        if (c.string() == "mask") {
+            // mask only dataset
+            LOG(debug) << "Mask-only dataset.";
+            flags |= Flag::maskOnly;
+        } else {
+            LOG(err2) << "Invalid modifier.";
+            return nullptr;
+        }
+    }
+
     // no updates
     if (openInfo->eAccess == GA_Update) {
         CPLError(CE_Failure, CPLE_NotSupported,
@@ -98,7 +115,7 @@ GDALDataset* MapyczDataset::Open(GDALOpenInfo *openInfo)
 
     // initialize dataset
     try {
-        return new MapyczDataset(mapType, zoom);
+        return new MapyczDataset(mapType, zoom, flags);
     } catch (const std::runtime_error & e) {
         CPLError(CE_Failure, CPLE_IllegalArg
                  , "Dataset initialization failure (%s).\n", e.what());
@@ -107,24 +124,32 @@ GDALDataset* MapyczDataset::Open(GDALOpenInfo *openInfo)
 }
 
 
-MapyczDataset::MapyczDataset(const std::string &mapType, int zoom)
+MapyczDataset::MapyczDataset(const std::string &mapType, int zoom
+                             , unsigned int flags)
     : mapType_(mapType), zoom_(zoom)
     , srs_(def::Srs.as(geo::SrsDefinition::Type::wkt).srs)
     , pixelSize_(std::pow(2.0, 15 - zoom), std::pow(2.0, 15 - zoom))
     , tileSize_((1 << (28 - zoom)), 1 << (28 - zoom))
     , curl_(createCurl()), lastTile_(-1, -1)
+    , flags_(flags)
 {
     // calculate size of raster in pixels
     nRasterXSize = (def::TileSize.width << zoom);
     nRasterYSize = (def::TileSize.height << zoom);
 
-    int index(1);
-    int cvChannel(2);
-    for (auto colorInterp : { GCI_RedBand, GCI_GreenBand, GCI_BlueBand }) {
-        SetBand(index, new MapyczRasterBand
-                (this, index, cvChannel, colorInterp));
-        ++index;
-        --cvChannel;
+    if (flags & Flag::maskOnly) {
+        // just mask
+        SetBand(1, new MapyczRasterBand(this, 1, 0, GCI_GrayIndex));
+    } else {
+        // full RGB
+        int index(1);
+        int cvChannel(2);
+        for (auto colorInterp : { GCI_RedBand, GCI_GreenBand, GCI_BlueBand }) {
+            SetBand(index, new MapyczRasterBand
+                    (this, index, cvChannel, colorInterp));
+            ++index;
+            --cvChannel;
+        }
     }
 
     // set some useful information into metadata
@@ -177,9 +202,11 @@ size_t gdal_drivers_mapy_cz_write(char *ptr, size_t size, size_t nmemb
 } // extern "C"
 
 namespace {
-cv::Mat fetchTile(::CURL *curl, const std::string &url)
+cv::Mat fetchTile(::CURL *curl, const std::string &url
+                  , bool maskOnly)
 {
-    LOG(info1) << "Fetching tile from <" << url << ">";
+    LOG(info1) << "Fetching tile from <" << url << "> "
+               << (maskOnly ? "(HEAD)" : "(GET)") << ".";
 
 #define CHECK_CURL_STATUS(what)                                         \
     do {                                                                \
@@ -194,7 +221,13 @@ cv::Mat fetchTile(::CURL *curl, const std::string &url)
     } while (0)
 
     // we are getting a resource
-    CHECK_CURL_STATUS(::curl_easy_setopt(curl, CURLOPT_HTTPGET, 1L));
+    if (maskOnly) {
+        CHECK_CURL_STATUS(::curl_easy_setopt(curl, CURLOPT_HTTPGET, 0L));
+        CHECK_CURL_STATUS(::curl_easy_setopt(curl, CURLOPT_NOBODY, 1L));
+    } else {
+        CHECK_CURL_STATUS(::curl_easy_setopt(curl, CURLOPT_HTTPGET, 1L));
+        CHECK_CURL_STATUS(::curl_easy_setopt(curl, CURLOPT_NOBODY, 0L));
+    }
 
     // HTTP/1.1
     CHECK_CURL_STATUS(::curl_easy_setopt(curl, CURLOPT_HTTP_VERSION
@@ -236,10 +269,11 @@ cv::Mat fetchTile(::CURL *curl, const std::string &url)
         // TODO: check redirect location
         // no imagery for this tile -> return black one
         cv::Mat black(def::TileSize.height, def::TileSize.width
-                      , CV_8UC3);
+                      , CV_8UC(maskOnly ? 1 : 3));
         // all pixels with all channels = 0 -> no content since 0 is no data
         // value
         black = cv::Scalar(0, 0, 0);
+        LOG(info1) << "Tile from <" << url << "> fetched.";
         return black;
     }
 
@@ -247,6 +281,17 @@ cv::Mat fetchTile(::CURL *curl, const std::string &url)
         LOGTHROW(err2, std::runtime_error)
             << "Failed to download tile data from <"
             << url << ">: Unexpected HTTP status code: <" << httpCode << ">.";
+    }
+
+    if (maskOnly) {
+        // just mask imagery for this tile -> return white one
+        cv::Mat white(def::TileSize.height, def::TileSize.width
+                      , CV_8UC1);
+        // all pixels with all channels = 0 -> no content since 0 is no data
+        // value
+        white = cv::Scalar(255, 255, 255);
+        LOG(info1) << "Tile from <" << url << "> fetched.";
+        return white;
     }
 
     auto image(imgproc::readImage(buffer.data(), buffer.size()));
@@ -278,6 +323,7 @@ cv::Mat fetchTile(::CURL *curl, const std::string &url)
         }
     }
 
+    LOG(info1) << "Tile from <" << url << "> fetched.";
     return image;
 }
 
@@ -293,7 +339,7 @@ const cv::Mat& MapyczDataset::getTile(const math::Point2i &tile)
     auto url(makeUrl(mapType_, zoom_, tile(0) * tileSize_.width
                      , (1 << 28) - ((tile(1) + 1) * tileSize_.height)));
 
-    auto image(fetchTile(curl_.get(), url));
+    auto image(fetchTile(curl_.get(), url, (flags_ & Flag::maskOnly)));
 
     // remember
     lastTileImage_ = image;

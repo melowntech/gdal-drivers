@@ -51,7 +51,7 @@ public:
     virtual const char *GetProjectionRef();
 
 private:
-    MapyczDataset(const std::string &mapType, int zoom);
+    MapyczDataset(const std::string &mapType, int zoom, unsigned int flags);
 
     const cv::Mat& getTile(const math::Point2i &tile);
 
@@ -72,6 +72,10 @@ private:
 
     math::Point2i lastTile_;
     cv::Mat lastTileImage_;
+
+    enum Flag : unsigned int { none = 0x0, maskOnly = 0x1};
+
+    unsigned int flags_;
 };
 
 /**

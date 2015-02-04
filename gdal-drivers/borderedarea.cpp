@@ -24,7 +24,8 @@ namespace gdal_drivers {
 
 namespace def {
     const fs::path MaskPath("borderedarea.tif");
-}
+} // namespace def
+
 /* class BorderedAreaDataset */
 
 GDALDataset* BorderedAreaDataset::Open(GDALOpenInfo *openInfo)
@@ -51,15 +52,33 @@ GDALDataset* BorderedAreaDataset::Open(GDALOpenInfo *openInfo)
     }
 }
 
+namespace {
+
+math::Size2 getTileSize(const geo::GeoDataset &mask)
+{
+    auto metadata(mask.getMetadata("BORDEREDAREA"));
+    auto width(metadata.get<int>("TILE_WIDTH"));
+    auto height(metadata.get<int>("TILE_HEIGHT"));
+    if (!width || !height) {
+        LOGTHROW(err2, std::runtime_error)
+            << "Invalid underlying GeoTiff: missing tile size.";
+    }
+    return { *width, *height };
+}
+
+} // namespace
 
 BorderedAreaDataset::BorderedAreaDataset(const fs::path &root)
     : root_(root)
     , mask_(geo::GeoDataset::createFromFS(root / def::MaskPath))
     , srs_(mask_.srsWkt())
-    , tileSize_(256, 256) // TODO: determine automatically
+    , tileSize_(getTileSize(mask_))
     , blackTile_(tileSize_.height, tileSize_.width, CV_8UC1)
     , whiteTile_(tileSize_.height, tileSize_.width, CV_8UC1)
 {
+    // underlying tiff must be gray
+    mask_.expectGray();
+
     nRasterXSize = (tileSize_.width * mask_.size().width);
     nRasterYSize = (tileSize_.height * mask_.size().height);
 

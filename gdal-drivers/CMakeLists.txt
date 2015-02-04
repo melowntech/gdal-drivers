@@ -5,6 +5,7 @@ set(gdal-drivers_SOURCES
 
   gttdataset.hpp gttdataset.cpp
   mapy-cz.hpp mapy-cz.cpp
+  borderedarea.hpp borderedarea.cpp
 )
 
 add_library(gdal-drivers STATIC ${gdal-drivers_SOURCES})

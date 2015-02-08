@@ -139,6 +139,7 @@ const cv::Mat& BorderedAreaDataset::getTile(const math::Point2i &tile)
     // detailed mask available, load tile from file
     auto path(root_ / str(boost::format("%06d/%06d.png")
                           % tile(1) % tile(0)));
+    LOG(info1) << "(ba) Loading tile from file " << path << ".";
     auto image(cv::imread(path.string(), CV_LOAD_IMAGE_GRAYSCALE));
     if (!image.data) {
         LOGTHROW(err2, std::runtime_error)

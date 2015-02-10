@@ -130,16 +130,24 @@ const cv::Mat& BorderedAreaDataset::getTile(const math::Point2i &tile)
 
     if (color == 0x00) {
         // masked-out
+        LOG(info1)
+            << "(ba) Returning full black tile (" << tile(0)
+            << ", " << tile(1) << ").";
         return blackTile_;
     } else if (color == 0xff) {
         // valid
+        LOG(info1)
+            << "(ba) Returning full white tile (" << tile(0)
+            << ", " << tile(1) << ").";
         return whiteTile_;
     }
 
     // detailed mask available, load tile from file
     auto path(root_ / str(boost::format("%06d/%06d.png")
                           % tile(1) % tile(0)));
-    LOG(info1) << "(ba) Loading tile from file " << path << ".";
+    LOG(info1)
+        << "(ba) Loading tile  (" << tile(0)
+        << ", " << tile(1) << ") from file " << path << ".";
     auto image(cv::imread(path.string(), CV_LOAD_IMAGE_GRAYSCALE));
     if (!image.data) {
         LOGTHROW(err2, std::runtime_error)

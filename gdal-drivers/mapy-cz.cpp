@@ -2,6 +2,8 @@
  * mapy-cz.cpp
  */
 
+#include <unistd.h>
+
 #include <cstdlib>
 #include <algorithm>
 #include <vector>
@@ -327,6 +329,22 @@ cv::Mat fetchTile(::CURL *curl, const std::string &url
     return image;
 }
 
+cv::Mat fetchTileSafe(::CURL *curl, const std::string &url
+                      , bool maskOnly, unsigned int tries)
+{
+    for (; tries; --tries) {
+        try {
+            return fetchTile(curl, url, maskOnly);
+        } catch (const std::exception &e) {
+            LOG(warn2) << "Failed to fetch tile, retrying.";
+            ::sleep(1);
+        }
+    }
+
+    // final try, let's it fall through on failure
+    return fetchTile(curl, url, maskOnly);
+}
+
 } // namespace
 
 const cv::Mat& MapyczDataset::getTile(const math::Point2i &tile)
@@ -339,7 +357,8 @@ const cv::Mat& MapyczDataset::getTile(const math::Point2i &tile)
     auto url(makeUrl(mapType_, zoom_, tile(0) * tileSize_.width
                      , (1 << 28) - ((tile(1) + 1) * tileSize_.height)));
 
-    auto image(fetchTile(curl_.get(), url, (flags_ & Flag::maskOnly)));
+    auto image(fetchTileSafe(curl_.get(), url, (flags_ & Flag::maskOnly)
+                             , 20));
 
     // remember
     lastTileImage_ = image;

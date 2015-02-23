@@ -155,7 +155,7 @@ void buildIndex(const fs::path &path, const fs::path &tileIndexPath
                 }
 
             math::Point2 dindex((de.ll(0) - alignment(0)) / tileUnits
-                                , de.ll(1) - alignment(1) / tileUnits);
+                                , (de.ll(1) - alignment(1)) / tileUnits);
 
             math::Point2i index(int(std::round(dindex(0)))
                                 , int(std::round(dindex(1))));

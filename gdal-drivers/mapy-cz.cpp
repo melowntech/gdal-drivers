@@ -40,7 +40,7 @@ namespace def {
                                    , -3700000.0 + (1 << 23)
                                    , 1300000.0 + (1 << 23));
 
-    geo::SrsDefinition Srs("+proj=utm +zone=33 +ellps=WGS84 +datum=WGS84");
+    std::string Srs("+proj=utm +zone=33 +ellps=WGS84 +datum=WGS84");
 
     const char *ProxyEnv("MAPYCZ_PROXY");
 } // namespace constants
@@ -129,7 +129,7 @@ GDALDataset* MapyczDataset::Open(GDALOpenInfo *openInfo)
 MapyczDataset::MapyczDataset(const std::string &mapType, int zoom
                              , unsigned int flags)
     : mapType_(mapType), zoom_(zoom)
-    , srs_(def::Srs.as(geo::SrsDefinition::Type::wkt).srs)
+    , srs_(geo::SrsDefinition(def::Srs).as(geo::SrsDefinition::Type::wkt).srs)
     , pixelSize_(std::pow(2.0, 15 - zoom), std::pow(2.0, 15 - zoom))
     , tileSize_((1 << (28 - zoom)), 1 << (28 - zoom))
     , curl_(createCurl()), lastTile_(-1, -1)

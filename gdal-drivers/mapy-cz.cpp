@@ -205,7 +205,7 @@ size_t gdal_drivers_mapy_cz_write(char *ptr, size_t size, size_t nmemb
 
 namespace {
 cv::Mat fetchTile(::CURL *curl, const std::string &url
-                  , bool maskOnly)
+                  , bool maskOnly, bool skipCorrupted)
 {
     LOG(info1) << "Fetching tile from <" << url << "> "
                << (maskOnly ? "(HEAD)" : "(GET)") << ".";
@@ -298,9 +298,16 @@ cv::Mat fetchTile(::CURL *curl, const std::string &url
 
     auto image(imgproc::readImage(buffer.data(), buffer.size()));
     if (!image.data) {
-        LOGTHROW(err2, std::runtime_error)
-            << "Failed to decode tile data downloaded from <"
-            << url << ">.";
+        if (skipCorrupted) {
+            LOG(warn2) << "Failed to decode tile data downloaded from <"
+                       << url << ">, using black image instead.";
+            image = cv::Mat( def::TileSize.height, def::TileSize.width
+                           , CV_8UC3, cv::Scalar(1, 1, 1));
+        } else {
+            LOGTHROW(err2, std::runtime_error)
+                << "Failed to decode tile data downloaded from <"
+                << url << ">.";
+        }
     }
 
     if ((image.cols != def::TileSize.width)
@@ -334,7 +341,7 @@ cv::Mat fetchTileSafe(::CURL *curl, const std::string &url
 {
     for (; tries; --tries) {
         try {
-            return fetchTile(curl, url, maskOnly);
+            return fetchTile(curl, url, maskOnly, false);
         } catch (const std::exception &e) {
             LOG(warn2) << "Failed to fetch tile, retrying.";
             ::sleep(1);
@@ -342,7 +349,7 @@ cv::Mat fetchTileSafe(::CURL *curl, const std::string &url
     }
 
     // final try, let's it fall through on failure
-    return fetchTile(curl, url, maskOnly);
+    return fetchTile(curl, url, maskOnly, true);
 }
 
 } // namespace

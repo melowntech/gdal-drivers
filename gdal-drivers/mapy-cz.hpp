@@ -34,6 +34,10 @@ typedef std::shared_ptr< ::CURL> Curl;
 
 class MapyczRasterBand;
 
+namespace detail {
+    class LocalCache;
+} // namespace detail
+
 /**
  * @brief GttDataset
  */
@@ -45,7 +49,7 @@ class MapyczDataset : public GDALDataset {
 public:
     static GDALDataset* Open(GDALOpenInfo *openInfo);
 
-    virtual ~MapyczDataset() {};
+    virtual ~MapyczDataset();
 
     virtual CPLErr GetGeoTransform(double *padfTransform);
     virtual const char *GetProjectionRef();
@@ -73,9 +77,11 @@ private:
     math::Point2i lastTile_;
     cv::Mat lastTileImage_;
 
-    enum Flag : unsigned int { none = 0x0, maskOnly = 0x1};
+    enum Flag : unsigned int { none = 0x0};
 
     unsigned int flags_;
+
+    std::unique_ptr<detail::LocalCache> cache_;
 };
 
 /**

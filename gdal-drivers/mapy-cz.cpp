@@ -21,6 +21,7 @@
 #include "imgproc/readimage.hpp"
 
 #include "./mapy-cz.hpp"
+#include "./detail/localcache.hpp"
 
 namespace gdal_drivers {
 
@@ -43,6 +44,7 @@ namespace def {
     std::string Srs("+proj=utm +zone=33 +ellps=WGS84 +datum=WGS84");
 
     const char *ProxyEnv("MAPYCZ_PROXY");
+    const char *CacheEnv("MAPYCZ_CACHEPATH");
 } // namespace constants
 
 std::string makeUrl(const std::string mapType, int zoom, long x, long y)
@@ -96,14 +98,9 @@ GDALDataset* MapyczDataset::Open(GDALOpenInfo *openInfo)
         // skip root and zoom
         if (index++ < 2) { continue; }
 
-        if (c.string() == "mask") {
-            // mask only dataset
-            LOG(debug) << "Mask-only dataset.";
-            flags |= Flag::maskOnly;
-        } else {
-            LOG(err2) << "Invalid modifier.";
-            return nullptr;
-        }
+        (void) c;
+        LOG(err2) << "Invalid modifier.";
+        return nullptr;
     }
 
     // no updates
@@ -125,6 +122,21 @@ GDALDataset* MapyczDataset::Open(GDALOpenInfo *openInfo)
     }
 }
 
+namespace {
+
+std::unique_ptr<detail::LocalCache> createCache()
+{
+    if (const char *cacheRoot = std::getenv(def::CacheEnv)) {
+        return std::unique_ptr<detail::LocalCache>
+            (new detail::LocalCache(cacheRoot));
+    }
+
+    return {};
+}
+
+} // namespace
+
+MapyczDataset::~MapyczDataset() {}
 
 MapyczDataset::MapyczDataset(const std::string &mapType, int zoom
                              , unsigned int flags)
@@ -133,25 +145,20 @@ MapyczDataset::MapyczDataset(const std::string &mapType, int zoom
     , pixelSize_(std::pow(2.0, 15 - zoom), std::pow(2.0, 15 - zoom))
     , tileSize_((1 << (28 - zoom)), 1 << (28 - zoom))
     , curl_(createCurl()), lastTile_(-1, -1)
-    , flags_(flags)
+    , flags_(flags), cache_(createCache())
 {
     // calculate size of raster in pixels
     nRasterXSize = (def::TileSize.width << zoom);
     nRasterYSize = (def::TileSize.height << zoom);
 
-    if (flags & Flag::maskOnly) {
-        // just mask
-        SetBand(1, new MapyczRasterBand(this, 1, 0, GCI_GrayIndex));
-    } else {
-        // full RGB
-        int index(1);
-        int cvChannel(2);
-        for (auto colorInterp : { GCI_RedBand, GCI_GreenBand, GCI_BlueBand }) {
-            SetBand(index, new MapyczRasterBand
+    // full RGB
+    int index(1);
+    int cvChannel(2);
+    for (auto colorInterp : { GCI_RedBand, GCI_GreenBand, GCI_BlueBand }) {
+        SetBand(index, new MapyczRasterBand
                     (this, index, cvChannel, colorInterp));
-            ++index;
-            --cvChannel;
-        }
+        ++index;
+        --cvChannel;
     }
 
     // set some useful information into metadata
@@ -204,98 +211,10 @@ size_t gdal_drivers_mapy_cz_write(char *ptr, size_t size, size_t nmemb
 } // extern "C"
 
 namespace {
-cv::Mat fetchTile(::CURL *curl, const std::string &url
-                  , bool maskOnly, bool skipCorrupted)
+
+cv::Mat decodeImage(const std::string &url
+                    , const Buffer &buffer, bool skipCorrupted)
 {
-    LOG(info1) << "Fetching tile from <" << url << "> "
-               << (maskOnly ? "(HEAD)" : "(GET)") << ".";
-
-#define CHECK_CURL_STATUS(what)                                         \
-    do {                                                                \
-        auto res(what);                                                 \
-        if (res != CURLE_OK) {                                          \
-            LOGTHROW(err2, std::runtime_error)                          \
-                << "Failed to download tile from <"                     \
-                << url << ">: <" << res << ", "                         \
-                << ::curl_easy_strerror(res)                            \
-                << ">.";                                                \
-        }                                                               \
-    } while (0)
-
-    // we are getting a resource
-    if (maskOnly) {
-        CHECK_CURL_STATUS(::curl_easy_setopt(curl, CURLOPT_HTTPGET, 0L));
-        CHECK_CURL_STATUS(::curl_easy_setopt(curl, CURLOPT_NOBODY, 1L));
-    } else {
-        CHECK_CURL_STATUS(::curl_easy_setopt(curl, CURLOPT_HTTPGET, 1L));
-        CHECK_CURL_STATUS(::curl_easy_setopt(curl, CURLOPT_NOBODY, 0L));
-    }
-
-    // HTTP/1.1
-    CHECK_CURL_STATUS(::curl_easy_setopt(curl, CURLOPT_HTTP_VERSION
-                                         , CURL_HTTP_VERSION_1_1));
-    // target url
-    CHECK_CURL_STATUS(::curl_easy_setopt(curl, CURLOPT_URL, url.c_str()));
-
-    // do not follow redirects -> we can detect non-existent tiles
-    CHECK_CURL_STATUS(::curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 0L));
-
-    // set referer ;)
-    CHECK_CURL_STATUS(::curl_easy_setopt
-                      (curl, CURLOPT_REFERER, def::RefererUrl.c_str()));
-
-    // use proxy if set in environment
-    if (const char *proxy = std::getenv(def::ProxyEnv)) {
-        LOG(info1) << "Using proxy server at <" << proxy << ">.";
-        CHECK_CURL_STATUS(::curl_easy_setopt(curl, CURLOPT_PROXY, proxy));
-    }
-
-    // image buffer
-    Buffer buffer;
-
-    // set output function + userdata
-    CHECK_CURL_STATUS(::curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION
-                                         , &gdal_drivers_mapy_cz_write));
-    CHECK_CURL_STATUS(::curl_easy_setopt(curl, CURLOPT_WRITEDATA, &buffer));
-
-    /// do the thing
-    CHECK_CURL_STATUS(::curl_easy_perform(curl));
-
-    // check status code:
-    long int httpCode(0);
-    CHECK_CURL_STATUS(::curl_easy_getinfo
-                      (curl, CURLINFO_RESPONSE_CODE, &httpCode));
-#undef CHECK_CURL_STATUS
-
-    if (httpCode == 302) {
-        // TODO: check redirect location
-        // no imagery for this tile -> return black one
-        cv::Mat black(def::TileSize.height, def::TileSize.width
-                      , CV_8UC(maskOnly ? 1 : 3));
-        // all pixels with all channels = 0 -> no content since 0 is no data
-        // value
-        black = cv::Scalar(0, 0, 0);
-        LOG(info1) << "Tile from <" << url << "> fetched.";
-        return black;
-    }
-
-    if (httpCode != 200) {
-        LOGTHROW(err2, std::runtime_error)
-            << "Failed to download tile data from <"
-            << url << ">: Unexpected HTTP status code: <" << httpCode << ">.";
-    }
-
-    if (maskOnly) {
-        // just mask imagery for this tile -> return white one
-        cv::Mat white(def::TileSize.height, def::TileSize.width
-                      , CV_8UC1);
-        // all pixels with all channels = 0 -> no content since 0 is no data
-        // value
-        white = cv::Scalar(255, 255, 255);
-        LOG(info1) << "Tile from <" << url << "> fetched.";
-        return white;
-    }
-
     auto image(imgproc::readImage(buffer.data(), buffer.size()));
     if (!image.data) {
         if (skipCorrupted) {
@@ -332,16 +251,125 @@ cv::Mat fetchTile(::CURL *curl, const std::string &url
         }
     }
 
+    return image;
+}
+
+long int fetchUrl(::CURL *curl, const std::string &url, Buffer &buffer)
+{
+    LOG(info1) << "Fetching tile from <" << url << "> "
+               << "(GET).";
+
+    buffer.clear();
+
+#define CHECK_CURL_STATUS(what)                                         \
+    do {                                                                \
+        auto res(what);                                                 \
+        if (res != CURLE_OK) {                                          \
+            LOGTHROW(err2, std::runtime_error)                          \
+                << "Failed to download tile from <"                     \
+                << url << ">: <" << res << ", "                         \
+                << ::curl_easy_strerror(res)                            \
+                << ">.";                                                \
+        }                                                               \
+    } while (0)
+
+    // we are getting a resource
+    CHECK_CURL_STATUS(::curl_easy_setopt(curl, CURLOPT_HTTPGET, 1L));
+    CHECK_CURL_STATUS(::curl_easy_setopt(curl, CURLOPT_NOBODY, 0L));
+
+    // HTTP/1.1
+    CHECK_CURL_STATUS(::curl_easy_setopt(curl, CURLOPT_HTTP_VERSION
+                                         , CURL_HTTP_VERSION_1_1));
+    // target url
+    CHECK_CURL_STATUS(::curl_easy_setopt(curl, CURLOPT_URL, url.c_str()));
+
+    // do not follow redirects -> we can detect non-existent tiles
+    CHECK_CURL_STATUS(::curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 0L));
+
+    // set referer ;)
+    CHECK_CURL_STATUS(::curl_easy_setopt
+                      (curl, CURLOPT_REFERER, def::RefererUrl.c_str()));
+
+    // use proxy if set in environment
+    if (const char *proxy = std::getenv(def::ProxyEnv)) {
+        LOG(info1) << "Using proxy server at <" << proxy << ">.";
+        CHECK_CURL_STATUS(::curl_easy_setopt(curl, CURLOPT_PROXY, proxy));
+    }
+
+    // set output function + userdata
+    CHECK_CURL_STATUS(::curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION
+                                         , &gdal_drivers_mapy_cz_write));
+    CHECK_CURL_STATUS(::curl_easy_setopt(curl, CURLOPT_WRITEDATA, &buffer));
+
+    /// do the thing
+    CHECK_CURL_STATUS(::curl_easy_perform(curl));
+
+    // check status code:
+    long int httpCode(0);
+    CHECK_CURL_STATUS(::curl_easy_getinfo
+                      (curl, CURLINFO_RESPONSE_CODE, &httpCode));
+#undef CHECK_CURL_STATUS
+    return httpCode;
+}
+
+cv::Mat fetchTile(detail::LocalCache *cache
+                  , ::CURL *curl, const std::string &url
+                  , bool skipCorrupted)
+{
+    Buffer buffer;
+    if (cache) {
+        buffer = cache->fetchTile(url);
+
+        if (!buffer.empty()) {
+            // tile loaded from cache
+            try {
+                auto image(decodeImage(url, buffer, false));
+                LOG(info1) << "Tile from <" << url << "> fetched.";
+                return image;
+            } catch (std::exception&) {
+                // cannot decode
+            }
+        }
+    }
+
+    // fetch from web
+
+    auto httpCode(fetchUrl(curl, url, buffer));
+
+    if (httpCode == 302) {
+        // TODO: check redirect location
+        // no imagery for this tile -> return black one
+        cv::Mat black(def::TileSize.height, def::TileSize.width, CV_8UC(3));
+        // all pixels with all channels = 0 -> no content since 0 is no data
+        // value
+        black = cv::Scalar(0, 0, 0);
+        LOG(info1) << "Tile from <" << url << "> fetched.";
+
+        // TODO: store marker in the cache
+        return black;
+    }
+
+    if (httpCode != 200) {
+        LOGTHROW(err2, std::runtime_error)
+            << "Failed to download tile data from <"
+            << url << ">: Unexpected HTTP status code: <" << httpCode << ">.";
+    }
+
+    auto image(decodeImage(url, buffer, skipCorrupted));
+
+    if (cache) { cache->storeTile(url, buffer); }
+
     LOG(info1) << "Tile from <" << url << "> fetched.";
     return image;
 }
 
-cv::Mat fetchTileSafe(::CURL *curl, const std::string &url
-                      , bool maskOnly, unsigned int tries)
+cv::Mat fetchTileSafe(detail::LocalCache *cache
+                      , ::CURL *curl, const std::string &url
+                      , unsigned int tries)
 {
     for (; tries; --tries) {
         try {
-            return fetchTile(curl, url, maskOnly, false);
+            return fetchTile(cache, curl, url, false);
         } catch (const std::exception &e) {
             LOG(warn2) << "Failed to fetch tile, retrying.";
             ::sleep(1);
@@ -349,7 +377,7 @@ cv::Mat fetchTileSafe(::CURL *curl, const std::string &url
     }
 
     // final try, let's it fall through on failure
-    return fetchTile(curl, url, maskOnly, true);
+    return fetchTile(cache, curl, url, true);
 }
 
 } // namespace
@@ -364,8 +392,7 @@ const cv::Mat& MapyczDataset::getTile(const math::Point2i &tile)
     auto url(makeUrl(mapType_, zoom_, tile(0) * tileSize_.width
                      , (1 << 28) - ((tile(1) + 1) * tileSize_.height)));
 
-    auto image(fetchTileSafe(curl_.get(), url, (flags_ & Flag::maskOnly)
-                             , 20));
+    auto image(fetchTileSafe(cache_.get(), curl_.get(), url, 20));
 
     // remember
     lastTileImage_ = image;

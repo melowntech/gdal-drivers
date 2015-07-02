@@ -1,17 +1,18 @@
 /**
- * @file mapy-cz.hpp
+ * @file webmerc.hpp
  * @author Vaclav Blazek <vaclav.blazek@citationtech.net>
  *
- * Mapy.cz GDAL driver implementation
+ * Web-Mercator GDAL driver implementation
  *
- * Adds to GDAL an ability to work with map data from mapy.cz.
- * Dataset uri: mapycz://MAP_TYPE/ZOOM where:
- *    * MAP_TYPE is one of base, ortho
- *    * ZOOM is a level-of-detail specifier in range 0-20
+ * Adds to GDAL an ability to work with map data in the web-mercator format
+ * Dataset uri: PROVIDER://MAP_TYPE/ZOOM where:
+ *    * PROVIDER is one of mapycz, google, ...
+ *    * MAP_TYPE selects one of provider's map
+ *    * ZOOM is a level-of-detail specifier
  */
 
-#ifndef gdal_drivers_mapy_cz_hpp_included_
-#define gdal_drivers_mapy_cz_hpp_included_
+#ifndef gdal_drivers_webmerc_hpp_included_
+#define gdal_drivers_webmerc_hpp_included_
 
 #include <gdal_priv.h>
 
@@ -26,7 +27,7 @@ namespace fs = boost::filesystem;
 
 namespace gdal_drivers {
 
-class MapyczRasterBand;
+class WebMercatorRasterBand;
 
 namespace detail {
     class Fetcher;
@@ -36,35 +37,27 @@ namespace detail {
  * @brief GttDataset
  */
 
-class MapyczDataset : public GDALDataset {
+class WebMercatorDataset : public GDALDataset {
 
-    friend class MapyczRasterBand;
+    friend class WebMercatorRasterBand;
 
 public:
     static GDALDataset* Open(GDALOpenInfo *openInfo);
 
-    virtual ~MapyczDataset();
+    virtual ~WebMercatorDataset();
 
     virtual CPLErr GetGeoTransform(double *padfTransform);
     virtual const char *GetProjectionRef();
 
 private:
-    MapyczDataset(const std::string &mapType, int zoom, unsigned int flags);
+    WebMercatorDataset(const std::string &urlTemplate
+                       , int zoom, unsigned int flags);
 
     const cv::Mat& getTile(const math::Point2i &tile);
 
-    const std::string mapType_;
     int zoom_;
 
     std::string srs_;
-
-    /** Pixel size in meters.
-     */
-    math::Size2f pixelSize_;
-
-    /** Tile size in PP units.
-     */
-    math::Size2_<long> tileSize_;
 
     math::Point2i lastTile_;
     cv::Mat lastTileImage_;
@@ -74,23 +67,25 @@ private:
     unsigned int flags_;
 
     std::unique_ptr<detail::Fetcher> fetcher_;
+
+    std::string urlTemplate_;
 };
 
 /**
- * @brief MapyczRasterBand
+ * @brief WebMercatorRasterBand
  */
 
-class MapyczRasterBand : public GDALRasterBand
+class WebMercatorRasterBand : public GDALRasterBand
 {
 
 public:
-    MapyczRasterBand(MapyczDataset *dset, int numBand
+    WebMercatorRasterBand(WebMercatorDataset *dset, int numBand
                      , int cvChannel
                      , GDALColorInterp colorInterp);
 
     virtual CPLErr IReadBlock(int blockCol, int blockRow, void *image);
 
-    virtual ~MapyczRasterBand() {};
+    virtual ~WebMercatorRasterBand() {};
 
     /** 0 is special marker for no-data pixels
      * NB: all valid pixels with 0 in original data are changed to 1 internally
@@ -112,7 +107,7 @@ private:
 
 // driver registration function
 CPL_C_START
-void GDALRegister_MapyCz(void);
+void GDALRegister_WebMercator(void);
 CPL_C_END
 
-#endif // gdal_drivers_mapy_cz_hpp_included_
+#endif // gdal_drivers_webmerc_hpp_included_

@@ -5,6 +5,7 @@ set(gdal-drivers_SOURCES
 
   gttdataset.hpp gttdataset.cpp
   mapy-cz.hpp mapy-cz.cpp
+  webmerc.hpp webmerc.cpp
   borderedarea.hpp borderedarea.cpp
 
   detail/fetcher.hpp detail/fetcher.cpp

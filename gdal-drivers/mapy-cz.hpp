@@ -22,20 +22,16 @@
 
 #include <opencv2/core/core.hpp>
 
-#include <curl/curl.h>
-
 #include "math/geometry_core.hpp"
 
 namespace fs = boost::filesystem;
 
 namespace gdal_drivers {
 
-typedef std::shared_ptr< ::CURL> Curl;
-
 class MapyczRasterBand;
 
 namespace detail {
-    class LocalCache;
+    class Fetcher;
 } // namespace detail
 
 /**
@@ -72,8 +68,6 @@ private:
      */
     math::Size2_<long> tileSize_;
 
-    Curl curl_;
-
     math::Point2i lastTile_;
     cv::Mat lastTileImage_;
 
@@ -81,7 +75,7 @@ private:
 
     unsigned int flags_;
 
-    std::unique_ptr<detail::LocalCache> cache_;
+    std::unique_ptr<detail::Fetcher> fetcher_;
 };
 
 /**

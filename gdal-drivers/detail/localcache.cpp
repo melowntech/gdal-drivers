@@ -6,6 +6,9 @@
 #include "utility/uri.hpp"
 #include "utility/streams.hpp"
 #include "utility/path.hpp"
+#include "utility/filesystem.hpp"
+#include "utility/binaryio.hpp"
+#include "utility/time.hpp"
 
 #include "./localcache.hpp"
 
@@ -32,43 +35,107 @@ fs::path tilePath(const fs::path &root, const std::string &uri)
         / fname;
 }
 
-} // namespace
+namespace bio = utility::binaryio;
 
-Buffer LocalCache::fetchTile(const std::string &uri)
+void removeTile(const fs::path &path)
 {
-    const auto path(tilePath(root_, uri));
-
-    try {
-        std::ifstream f;
-        f.exceptions(std::ios::badbit | std::ios::failbit);
-        f.open(path.string(), std::ios_base::in);
-        f.seekg(0, std::ifstream::end);
-        auto size(f.tellg());
-        f.seekg(0);
-        Buffer data(size);
-        f.read(&data[0], data.size());
-        f.close();
-        return data;
-    } catch (const std::exception &e) {
-        LOG(warn1) << "Cannot read tile <" << uri << "> from file "
-                   << path  << ": " << e.what();
-    }
-
-    return {};
+    boost::system::error_code ec;
+    fs::remove(path, ec);
 }
 
-void LocalCache::storeTile(const std::string &uri, const Buffer &data)
+} // namespace
+
+LocalCache::Tile LocalCache::fetchTile(const std::string &uri)
 {
+    const auto path(tilePath(root_, uri));
+    LOG(debug) << "Loading tile <" << uri << "> from file "
+               << path  << ".";
+
+    try {
+        utility::ifstreambuf f(path.string());
+        f.seekg(0, std::ifstream::end);
+        std::size_t size(f.tellg());
+        f.seekg(0);
+
+        Tile tile(Tile::Type::notFound);
+
+        // read type field
+        std::uint8_t type;
+        bio::read(f, type);
+        switch (type) {
+        case 0: tile.type = Tile::Type::empty; break;
+        case 1: tile.type = Tile::Type::valid; break;
+        default:
+            // invalid data
+            tile.type = Tile::Type::notFound;
+            removeTile(path);
+            return tile;
+        }
+
+        // read expires field
+        std::int64_t expires;
+        bio::read(f, expires);
+        tile.expires = expires;
+
+        // check for expiration
+        if (tile.expires
+            && (std::time_t(utility::currentTime().first) > tile.expires)) {
+            // invalid data
+            tile.type = Tile::Type::notFound;
+            removeTile(path);
+            return tile;
+        }
+
+        if (tile.type == Tile::Type::valid) {
+            tile.data.resize(size - sizeof(type) - sizeof(expires));
+            bio::read(f, tile.data.data(), tile.data.size());
+        }
+        f.close();
+        return tile;
+    } catch (const std::exception &e) {
+        LOG(debug) << "Cannot read tile <" << uri << "> from file "
+                   << path  << ": " << e.what() << ".";
+        removeTile(path);
+    }
+
+    return { Tile::Type::notFound };
+}
+
+void LocalCache::storeTile(const std::string &uri, const Tile &tile)
+{
+    std::uint8_t type(0);
+    switch (tile.type) {
+    case Tile::Type::empty: type = 0; break;
+    case Tile::Type::valid: type = 1; break;
+    default:
+        // ignore anything else unknown
+        return;
+    }
+
     const auto path(tilePath(root_, uri));
     const auto tmpPath(utility::addExtension(path, ".tmp"));
 
+    LOG(debug) << "Storing tile <" << uri << "> into file "
+               << path  << ".";
+
     try {
         create_directories(tmpPath.parent_path());
-        utility::write(path, data.data(), data.size());
+
+        {
+            utility::ofstreambuf f(tmpPath.string());
+            bio::write(f, type);
+            std::int64_t expires(tile.expires);
+            bio::write(f, expires);
+            if (tile.type == Tile::Type::valid) {
+                bio::write(f, tile.data.data(), tile.data.size());
+            }
+            f.close();
+        }
+
         rename(tmpPath, path);
     } catch (const std::exception &e) {
-        LOG(warn1) << "Cannot store tile <" << uri << "> in file "
-                   << path  << ": " << e.what();
+        LOG(debug) << "Cannot store tile <" << uri << "> in file "
+                   << path  << ": " << e.what() << ".";
     }
 }
 

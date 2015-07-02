@@ -22,14 +22,25 @@ class LocalCache {
 public:
     LocalCache(const fs::path &root) : root_(root) {}
 
+    struct Tile {
+        enum class Type {
+            empty, valid, notFound
+        };
+
+        Type type;
+        Buffer data;
+        std::time_t expires;
+
+        Tile(Type type = Type::valid) : type(type), expires() {}
+    };
+
     /** Tries to fetch tile from filesystem cache.
-     *  Returns empty buffer on error.
      */
-    Buffer fetchTile(const std::string &uri);
+    Tile fetchTile(const std::string &uri);
 
     /** Stores tile.
      */
-    void storeTile(const std::string &uri, const Buffer &data);
+    void storeTile(const std::string &uri, const Tile &tile);
 
 private:
     const fs::path root_;

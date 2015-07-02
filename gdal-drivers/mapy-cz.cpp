@@ -17,6 +17,7 @@
 #include "dbglog/dbglog.hpp"
 #include "utility/uri.hpp"
 #include "utility/path.hpp"
+#include "utility/time.hpp"
 #include "geo/srsdef.hpp"
 #include "imgproc/readimage.hpp"
 
@@ -312,41 +313,56 @@ long int fetchUrl(::CURL *curl, const std::string &url, Buffer &buffer)
     return httpCode;
 }
 
+cv::Mat blackTile()
+{
+    cv::Mat black(def::TileSize.height, def::TileSize.width, CV_8UC(3)
+                  , cv::Scalar(0, 0, 0));
+    return black;
+}
+
 cv::Mat fetchTile(detail::LocalCache *cache
                   , ::CURL *curl, const std::string &url
                   , bool skipCorrupted)
 {
-    Buffer buffer;
+    using detail::LocalCache;
+    LocalCache::Tile tile;
     if (cache) {
-        buffer = cache->fetchTile(url);
+        tile = cache->fetchTile(url);
 
-        if (!buffer.empty()) {
+        switch (tile.type) {
+        case LocalCache::Tile::Type::empty:
+            return blackTile();
+
+        case LocalCache::Tile::Type::valid:
             // tile loaded from cache
             try {
-                auto image(decodeImage(url, buffer, false));
-                LOG(info1) << "Tile from <" << url << "> fetched.";
+                auto image(decodeImage(url, tile.data, false));
+                LOG(info1) << "Tile from <" << url << "> fetched (cached).";
                 return image;
             } catch (std::exception&) {
                 // cannot decode
             }
+
+        default: break; // not found
         }
     }
 
     // fetch from web
 
-    auto httpCode(fetchUrl(curl, url, buffer));
+    auto httpCode(fetchUrl(curl, url, tile.data));
 
     if (httpCode == 302) {
         // TODO: check redirect location
         // no imagery for this tile -> return black one
-        cv::Mat black(def::TileSize.height, def::TileSize.width, CV_8UC(3));
-        // all pixels with all channels = 0 -> no content since 0 is no data
-        // value
-        black = cv::Scalar(0, 0, 0);
         LOG(info1) << "Tile from <" << url << "> fetched.";
 
-        // TODO: store marker in the cache
-        return black;
+        if (cache) {
+            tile.type = LocalCache::Tile::Type::empty;
+            tile.expires = utility::currentTime().first + 604800; // a week
+            cache->storeTile(url, tile);
+        }
+
+        return blackTile();
     }
 
     if (httpCode != 200) {
@@ -355,9 +371,13 @@ cv::Mat fetchTile(detail::LocalCache *cache
             << url << ">: Unexpected HTTP status code: <" << httpCode << ">.";
     }
 
-    auto image(decodeImage(url, buffer, skipCorrupted));
+    auto image(decodeImage(url, tile.data, skipCorrupted));
 
-    if (cache) { cache->storeTile(url, buffer); }
+    if (cache) {
+        tile.type = LocalCache::Tile::Type::valid;
+        tile.expires = utility::currentTime().first + 604800; // a week
+        cache->storeTile(url, tile);
+    }
 
     LOG(info1) << "Tile from <" << url << "> fetched.";
     return image;

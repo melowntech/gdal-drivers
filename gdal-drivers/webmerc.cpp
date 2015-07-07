@@ -166,8 +166,6 @@ std::string TileServiceInfo::translateTemplate(std::string temp)
         ++index;
     }
 
-    LOG(info4) << temp;
-
     return temp;
 }
 

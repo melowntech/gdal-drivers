@@ -11,6 +11,18 @@
 
 extern "C" {
 
+int gdal_drivers_detail_fetcher_debug(CURL *handle
+                                      , curl_infotype type
+                                      , char *data
+                                      , size_t size
+                                      , void *)
+{
+    if (type == CURLINFO_HEADER_OUT) {
+        LOG(info4) << handle << " headers out:\n" << std::string(data, size);
+    }
+    return 0;
+}
+
 size_t gdal_drivers_detail_fetcher_write(char *ptr, size_t size, size_t nmemb
                                          , void *userdata)
 {
@@ -25,6 +37,9 @@ size_t gdal_drivers_detail_fetcher_write(char *ptr, size_t size, size_t nmemb
 namespace gdal_drivers { namespace detail {
 
 namespace {
+
+const char *UserAgent
+    ("Mozilla/5.0 (Windows NT 6.3; rv:36.0) Gecko/20100101 Firefox/36.0");
 
 std::shared_ptr< ::CURL> createCurl()
 {
@@ -94,6 +109,9 @@ cv::Mat decodeImage(const std::string &url, const math::Size2i &tileSize
         }                                                               \
     } while (0)
 
+#define SETOPT(name, value) \
+    CHECK_CURL_STATUS(::curl_easy_setopt(curl, name, value))
+
 long int fetchUrl(::CURL *curl, const std::string &url
                   , Buffer &buffer)
 {
@@ -103,34 +121,36 @@ long int fetchUrl(::CURL *curl, const std::string &url
     buffer.clear();
 
     // we are getting a resource
-    CHECK_CURL_STATUS(::curl_easy_setopt(curl, CURLOPT_HTTPGET, 1L));
-    CHECK_CURL_STATUS(::curl_easy_setopt(curl, CURLOPT_NOBODY, 0L));
+    SETOPT(CURLOPT_HTTPGET, 1L);
+    SETOPT(CURLOPT_NOSIGNAL, 1L);
 
     // HTTP/1.1
-    CHECK_CURL_STATUS(::curl_easy_setopt(curl, CURLOPT_HTTP_VERSION
-                                         , CURL_HTTP_VERSION_1_1));
+    SETOPT(CURLOPT_HTTP_VERSION, CURL_HTTP_VERSION_1_1);
     // target url
-    CHECK_CURL_STATUS(::curl_easy_setopt(curl, CURLOPT_URL, url.c_str()));
+    SETOPT(CURLOPT_URL, url.c_str());
 
     // do not follow redirects -> we can detect non-existent tiles
-    CHECK_CURL_STATUS(::curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 0L));
+    SETOPT(CURLOPT_FOLLOWLOCATION, 0L);
 
+#if 0
     auto uri(utility::parseUri(url));
     if (!uri.host.empty()) {
         // set referer :)
         uri.search = uri.user = uri.password = uri.path = "";
-        CHECK_CURL_STATUS(::curl_easy_setopt
-                          (curl, CURLOPT_REFERER, uri.join().c_str()));
+        SETOPT(CURLOPT_REFERER, uri.join().c_str());
     } else {
-        CHECK_CURL_STATUS(::curl_easy_setopt
-                          (curl, CURLOPT_REFERER, nullptr));
+        SETOPT(CURLOPT_REFERER, nullptr);
     }
+#endif
 
     // set output function + userdata
-    CHECK_CURL_STATUS(::curl_easy_setopt
-                      (curl, CURLOPT_WRITEFUNCTION
-                       , &gdal_drivers_detail_fetcher_write));
-    CHECK_CURL_STATUS(::curl_easy_setopt(curl, CURLOPT_WRITEDATA, &buffer));
+    SETOPT(CURLOPT_WRITEFUNCTION, &gdal_drivers_detail_fetcher_write);
+    SETOPT(CURLOPT_WRITEDATA, &buffer);
+
+    SETOPT(CURLOPT_DEBUGFUNCTION, &gdal_drivers_detail_fetcher_debug);
+    // SETOPT(CURLOPT_VERBOSE, 1L));
+
+    SETOPT(CURLOPT_USERAGENT, UserAgent);
 
     /// do the thing
     CHECK_CURL_STATUS(::curl_easy_perform(curl));
@@ -144,6 +164,7 @@ long int fetchUrl(::CURL *curl, const std::string &url
 }
 
 #undef CHECK_CURL_STATUS
+#undef SETOPT
 
 cv::Mat blackTile(const math::Size2i &tileSize)
 {
@@ -184,9 +205,14 @@ cv::Mat fetchTile(LocalCache *cache, ::CURL *curl
     auto httpCode(fetchUrl(curl, url, tile.data));
 
     if (httpCode == 302) {
-        // TODO: check redirect location
+        // TODO: check redirect location, this works mainly for mapy.cz
+
         // no imagery for this tile -> return black one
-        LOG(info1) << "Tile from <" << url << "> fetched.";
+        httpCode = 404;
+    }
+
+    if (httpCode == 404) {
+        LOG(info1) << "Tile from <" << url << "> fetched (not found).";
 
         if (cache) {
             tile.type = LocalCache::Tile::Type::empty;

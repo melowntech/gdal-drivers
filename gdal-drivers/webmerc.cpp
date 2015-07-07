@@ -35,54 +35,42 @@ namespace def {
     const std::map<std::string, std::string> UrlMap = {
         { "GoogleSat", "https://khms${GOOG_DIGIT}.google.com/kh/v=175&x=${X}&y=${Y}&z=${ZOOM}" }
         , { "GoogleMap", "https://mt${GOOG_DIGIT}.google.com/vt/lyrs=m@132&hl=pt-PT&x=${X}&y=${Y}&z=${ZOOM}&s=${GALILEO}" }
-        , { "GoogleTer", "https://mt${GOOG_DIGIT}.google.com/vt/v=t@132,r@249&hl=pt-PT&x=${X}&y=${Y}&z=${ZOOM}&s=${GALILEO}" }
-        , { "GoogleChina", "http://mt${GOOG_DIGIT}.google.cn/vt/lyrs=m@121&hl=en&gl=cn&x=${X}&y=${Y}&z=${ZOOM}&s=${GALILEO}" }
-        , { "MicrosoftBrMap", "http://imakm${MS_DIGITBR}.maplink3.com.br/maps.ashx?v=${QUAD}|t&call=2.2.4" }
+
         , { "MicrosoftHyb", "http://ecn.t${MS_DIGIT}.tiles.virtualearth.net/tiles/h${QUAD}.png?g=441&mkt=en-us&n=z" }
         , { "MicrosoftSat", "http://ecn.t${MS_DIGIT}.tiles.virtualearth.net/tiles/a${QUAD}.png?g=441&mkt=en-us&n=z" }
         , { "MicrosoftMap", "http://ecn.t${MS_DIGIT}.tiles.virtualearth.net/tiles/r${QUAD}.png?g=441&mkt=en-us&n=z" }
-        , { "MicrosoftTer", "http://ecn.t${MS_DIGIT}.tiles.virtualearth.net/tiles/r${QUAD}.png?g=441&mkt=en-us&shading=hill&n=z" }
-        , { "OviSat", "http://maptile.maps.svc.ovi.com/maptiler/v2/maptile/newest/satellite.day/${Z}/${X}/${Y}/256/png8" }
-        , { "OviHybrid", "http://maptile.maps.svc.ovi.com/maptiler/v2/maptile/newest/hybrid.day/${Z}/${X}/${Y}/256/png8" }
+
+        , { "OviSat", "http://maptile.maps.svc.ovi.com/maptiler/v2/maptile/newest/satellite.day/${ZOOM}/${X}/${Y}/256/png8" }
+        , { "OviHybrid", "http://maptile.maps.svc.ovi.com/maptiler/v2/maptile/newest/hybrid.day/${ZOOM}/${X}/${Y}/256/png8" }
+
         , { "OpenStreetMap", "http://tile.openstreetmap.org/${ZOOM}/${X}/${Y}.png" }
-        , { "OSMARender", "http://tah.openstreetmap.org/Tiles/tile/${ZOOM}/${X}/${Y}.png" }
-        , { "OpenAerialMap", "http://tile.openaerialmap.org/tiles/?v=mgm&layer=openaerialmap-900913&x=${X}&y=${Y}&zoom=${OAM_ZOOM}" }
-        , { "OpenCycleMap", "http://andy.sandbox.cloudmade.com/tiles/cycle/${ZOOM}/${X}/${Y}.png" }
+
         , { "MapyCzOphoto", "http://m1.mapserver.mapy.cz/ophoto-m/${ZOOM}-${X}-${Y}" }
         , { "MapyCzBase", "http://m1.mapserver.mapy.cz/base-m/${ZOOM}-${X}-${Y}" }
+        , { "MapyCzArmy2", "http://m1.mapserver.mapy.cz/army2-m/${ZOOM}-${X}-${Y}" }
     };
 
     const std::map<std::string, std::string> SupportedSources = {
         { "google/", "GoogleSat" }
         , { "google/satellite", "GoogleSat" }
         , { "google/map", "GoogleMap" }
-        , { "google/terrain", "GoogleTer" }
-        , { "google/china", "GoogleChina" }
 
         , { "bing/", "MicrosoftSat" }
-        , { "bing/brmap", "MicrosoftBrMap" }
         , { "bing/hybride", "MicrosoftHyb" }
         , { "bing/satellite", "MicrosoftSat" }
         , { "bing/map", "MicrosoftMap" }
-        , { "bing/terrain", "MicrosoftTer" }
 
         , { "ovi/", "OviSat" }
         , { "ovi/satellite", "OviSat" }
-        , { "ovi/map", "OviMap" }
+        , { "ovi/hybrid", "OviHybrid" }
 
         , { "osm/", "OpenStreetMap" }
         , { "osm/map", "OpenStreetMap" }
-        , { "osm/render", "OSMARender" }
-
-        , { "openaerial/", "OpenAerialMap" }
-        , { "openaerial/map", "OpenAerialMap" }
-
-        , { "opencycle/", "OpenCycleMap" }
-        , { "opencycle/map", "OpenCycleMap" }
 
         , { "mapycz/", "MapyCzOphoto" }
         , { "mapycz/ophoto-m", "MapyCzOphoto" }
         , { "mapycz/base-m", "MapyCzBase" }
+        , { "mapycz/army2-m", "MapyCzArmy2" }
     };
 
     const math::Size2i TileSize(256, 256);
@@ -101,7 +89,7 @@ std::string buildQuad(int x, int y, int zoom)
     std::string q;
 
     for (int i = zoom - 1; i >=0 ; --i) {
-        q.append(str(boost::format("%02d")
+        q.append(str(boost::format("%d")
                      % (((((y >> i) & 1) << 1) + ((x >> i) & 1)))));
     }
 
@@ -140,10 +128,6 @@ struct TileServiceInfo {
 
 private:
     std::string formatUrl(const std::string &u) {
-        LOG(info4) << "template: " << u;
-        LOG(info4) << "x: : " << x;
-        LOG(info4) << "y: : " << y;
-        LOG(info4) << "zoom: : " << zoom;
         boost::format format(u);
         format.exceptions(boost::io::all_error_bits
                           ^ boost::io::too_many_args_bit);

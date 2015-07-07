@@ -11,6 +11,7 @@
 
 #include <boost/lexical_cast.hpp>
 #include <boost/format.hpp>
+#include <boost/algorithm/string/predicate.hpp>
 
 #include <opencv2/highgui/highgui.hpp>
 
@@ -24,6 +25,8 @@
 
 namespace gdal_drivers {
 
+namespace ba = boost::algorithm;
+
 namespace {
 
 namespace def {
@@ -33,7 +36,6 @@ namespace def {
     const std::string RefererUrl("http://mapy.cz/");
 
     const std::string Schema("mapycz");
-    const std::string DefaultMapType("ophoto");
 
     const math::Size2i TileSize(256, 256);
     const math::Extents2 PPExtents(-3700000.0, 1300000.0
@@ -73,7 +75,12 @@ GDALDataset* MapyczDataset::Open(GDALOpenInfo *openInfo)
     if (uri.schema != def::Schema) { return nullptr; }
 
     // get map type (from uri host, with fallback to default map type
-    auto mapType(uri.host.empty() ? def::DefaultMapType : uri.host);
+    auto mapType(uri.host);
+
+    if (ba::ends_with(mapType, "-m")) {
+        // mercator -> let the Webmercator module handle this
+        return nullptr;
+    }
 
     // parse zoom
     int zoom;

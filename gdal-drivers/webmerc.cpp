@@ -50,6 +50,14 @@ namespace def {
         , { "MapyCzArmy2", "http://m1.mapserver.mapy.cz/army2-m/${ZOOM}-${X}-${Y}" }
 
         , { "ArcGISTopo", "http://services.arcgisonline.com/ArcGIS/rest/services/World_Topo_Map/MapServer/tile/${ZOOM}/${Y}/${X}.png" }
+        , { "ArcGISStreet", "http://services.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/${ZOOM}/${Y}/${X}.png" }
+        , { "ArcGISPhysical", "http://services.arcgisonline.com/ArcGIS/rest/services/World_Physical_Map/MapServer/tile/${ZOOM}/${Y}/${X}.png" }
+        , { "ArcGISShadedRelief", "http://services.arcgisonline.com/ArcGIS/rest/services/World_Shaded_Relief/MapServer/tile/${ZOOM}/${Y}/${X}.png" }
+        , { "ArcGISImagery", "http://services.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/${ZOOM}/${Y}/${X}.png" }
+        , { "ArcGISNatGeo", "http://services.arcgisonline.com/ArcGIS/rest/services/NatGeo_World_Map/MapServer/tile/${ZOOM}/${Y}/${X}.png" }
+        , { "ArcGISUsaTopo", "http://services.arcgisonline.com/ArcGIS/rest/services/USA_Topo_Maps/MapServer/tile/${ZOOM}/${Y}/${X}.png" }
+        , { "ArcGISOcean", "http://services.arcgisonline.com/ArcGIS/rest/services/Ocean/World_Ocean_Base/MapServer/tile/${ZOOM}/${Y}/${X}.png" }
+        , { "ArcGISOceanReference", "http://services.arcgisonline.com/ArcGIS/rest/services/Ocean/World_Ocean_Reference/MapServer/tile/${ZOOM}/${Y}/${X}.png" }
     };
 
     const std::map<std::string, std::string> SupportedSources = {
@@ -76,6 +84,13 @@ namespace def {
 
         , { "arcgis/", "ArcGISTopo" }
         , { "arcgis/topo", "ArcGISTopo" }
+        , { "arcgis/street", "ArcGISStreet" }
+        , { "arcgis/relief", "ArcGISShadedRelief" }
+        , { "arcgis/imagery", "ArcGISImagery" }
+        , { "arcgis/natgeo", "ArcGISNatGeo" }
+        , { "arcgis/topo-usa", "ArcGISUsaTopo" }
+        , { "arcgis/ocean", "ArcGISOcean" }
+        , { "arcgis/ocean-ref", "ArcGISOceanReference" }
     };
 
     const math::Size2i TileSize(256, 256);

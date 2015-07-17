@@ -48,6 +48,8 @@ namespace def {
         , { "MapyCzOphoto", "http://m1.mapserver.mapy.cz/ophoto-m/${ZOOM}-${X}-${Y}" }
         , { "MapyCzBase", "http://m1.mapserver.mapy.cz/base-m/${ZOOM}-${X}-${Y}" }
         , { "MapyCzArmy2", "http://m1.mapserver.mapy.cz/army2-m/${ZOOM}-${X}-${Y}" }
+
+        , { "ArcGISTopo", "http://services.arcgisonline.com/ArcGIS/rest/services/World_Topo_Map/MapServer/tile/${ZOOM}/${Y}/${X}.png" }
     };
 
     const std::map<std::string, std::string> SupportedSources = {
@@ -71,6 +73,9 @@ namespace def {
         , { "mapycz/ophoto-m", "MapyCzOphoto" }
         , { "mapycz/base-m", "MapyCzBase" }
         , { "mapycz/army2-m", "MapyCzArmy2" }
+
+        , { "arcgis/", "ArcGISTopo" }
+        , { "arcgis/topo", "ArcGISTopo" }
     };
 
     const math::Size2i TileSize(256, 256);

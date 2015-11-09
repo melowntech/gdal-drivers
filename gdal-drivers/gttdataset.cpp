@@ -237,7 +237,7 @@ GDALDataset * GttDataset::Open( GDALOpenInfo * openInfo ) {
     if( openInfo->eAccess == GA_Update ) {
 
         CPLError( CE_Failure, CPLE_NotSupported,
-                  "The JDEM driver does not support update access to existing"
+                  "The GTT driver does not support update access to existing"
                   " datasets.\n" );
         return 0x0;
     }

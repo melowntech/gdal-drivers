@@ -24,15 +24,28 @@ namespace gdal_drivers {
 
 namespace def {
     const fs::path MaskPath("borderedarea.tif");
+    const fs::path HelperPath("borderedarea");
 } // namespace def
 
-/* class BorderedAreaDataset */
+namespace {
+
+fs::path getPath(const char *filename) {
+    fs::path path(filename);
+    if (path.filename() == def::HelperPath) {
+        return path.parent_path();
+    }
+
+    return path;
+}
+
+} // namespace
 
 GDALDataset* BorderedAreaDataset::Open(GDALOpenInfo *openInfo)
 {
-    const auto path(openInfo->pszFilename / def::MaskPath);
+    const auto path(getPath(openInfo->pszFilename));
+    LOG(info4) << "HERE: " << path;
 
-    if (!exists(path)) { return nullptr; }
+    if (!exists(path / def::MaskPath)) { return nullptr; }
 
     // no updates
     if (openInfo->eAccess == GA_Update) {
@@ -44,7 +57,7 @@ GDALDataset* BorderedAreaDataset::Open(GDALOpenInfo *openInfo)
 
     // initialize dataset
     try {
-        return new BorderedAreaDataset(openInfo->pszFilename);
+        return new BorderedAreaDataset(path.c_str());
     } catch (const std::runtime_error & e) {
         CPLError(CE_Failure, CPLE_IllegalArg
                  , "Dataset initialization failure (%s).\n", e.what());

@@ -43,7 +43,6 @@ fs::path getPath(const char *filename) {
 GDALDataset* BorderedAreaDataset::Open(GDALOpenInfo *openInfo)
 {
     const auto path(getPath(openInfo->pszFilename));
-    LOG(info4) << "HERE: " << path;
 
     if (!exists(path / def::MaskPath)) { return nullptr; }
 

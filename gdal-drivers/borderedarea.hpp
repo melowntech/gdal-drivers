@@ -99,7 +99,7 @@ public:
         return 0.0;
     }
 
-    virtual GDALColorInterp GetColorInterpretation() { return GCI_AlphaBand; }
+    virtual GDALColorInterp GetColorInterpretation() { return GCI_GrayIndex; }
 
 private:
     int cvChannel_;

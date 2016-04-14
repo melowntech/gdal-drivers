@@ -193,15 +193,22 @@ CPLErr MaskDataset::RasterBand::IReadBlock(int blockCol, int blockRow
     const auto &dset(*static_cast<MaskDataset*>(poDS));
 
     const auto &ts(dset.tileSize_);
-    unsigned int xShift(blockCol * ts.width);
-    unsigned int yShift(blockRow * ts.height);
+    int xShift(blockCol * ts.width);
+    int yShift(blockRow * ts.height);
+
+    // setup constraints
+    Mask::Constraints con(depth_);
+    con.extents.ll(0) = (xShift << tail_);
+    con.extents.ll(1) = (yShift << tail_);
+    con.extents.ur(0) = con.extents.ll(0) + (ts.width << tail_);
+    con.extents.ur(1) = con.extents.ll(1) + (ts.height << tail_);
 
     try {
         // wrap tile into matrix and reset to to zero
         cv::Mat tile(ts.height, ts.width, CV_8UC1, rawImage);
         tile = cv::Scalar(color::black);
 
-        auto draw([&](unsigned int x, unsigned int y
+        auto draw([&](int x, int y
                       , unsigned int size, boost::tribool value)
         {
             // black -> nothing
@@ -217,14 +224,12 @@ CPLErr MaskDataset::RasterBand::IReadBlock(int blockCol, int blockRow
             // construct rectangle and intersect it with bounds
             cv::Rect r(x, y, size, size);
             auto rr(r & tileBounds_);
-
-            // draw white or gray rectangle
             cv::rectangle(tile, rr
                           , (value ? color::white : color::gray)
                           , CV_FILLED, 4);
         });
 
-        dset.mask_.forEachQuad(draw, depth_);
+        dset.mask_.forEachQuad(draw, con);
     } catch (const std::exception &e) {
         CPLError(CE_Failure, CPLE_FileIO, "%s\n", e.what());
         return CE_Failure;

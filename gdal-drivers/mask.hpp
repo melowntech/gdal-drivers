@@ -42,7 +42,7 @@ public:
     virtual const char *GetProjectionRef();
 
 private:
-    MaskDataset(const fs::path &path);
+    MaskDataset(const fs::path &path, std::ifstream &f);
 
     class RasterBand;
     friend class RasterBand;

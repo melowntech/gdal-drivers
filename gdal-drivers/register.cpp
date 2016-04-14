@@ -12,6 +12,7 @@ void registerAll()
     GDALRegister_MapyCz();
     GDALRegister_WebMercator();
     GDALRegister_Gtt();
+    GDALRegister_BorderedArea();
     GDALRegister_MaskDataset();
 }
 

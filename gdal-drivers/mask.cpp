@@ -8,8 +8,10 @@
 #include <iterator>
 
 #include <boost/filesystem/path.hpp>
+#include <boost/logic/tribool_io.hpp>
 
 #include <opencv2/core/core.hpp>
+#include <opencv2/imgproc/imgproc.hpp>
 
 #include "dbglog/dbglog.hpp"
 
@@ -22,11 +24,6 @@ namespace fs = boost::filesystem;
 namespace bin = utility::binaryio;
 
 namespace gdal_drivers {
-
-namespace def {
-    const fs::path MaskPath("borderedarea.tif");
-    const fs::path HelperPath("borderedarea");
-} // namespace def
 
 /**
  * @brief BorderedAreaRasterBand
@@ -48,10 +45,29 @@ public:
     }
 
     virtual GDALColorInterp GetColorInterpretation() { return GCI_GrayIndex; }
+
+private:
+    cv::Rect tileBounds_;
 };
 
 GDALDataset* MaskDataset::Open(GDALOpenInfo *openInfo)
 {
+    ::CPLErrorReset();
+
+    // try to open
+    utility::ifstreambuf f;
+    try {
+        f.open(openInfo->pszFilename);
+        const char IO_MAGIC[6] = { 'G', 'D', 'A', 'L', 'Q', 'M' };
+        char magic[6];
+        bin::read(f, magic);
+        if (std::memcmp(magic, IO_MAGIC, sizeof(IO_MAGIC))) {
+            return nullptr;
+        }
+    } catch (...) { return nullptr; }
+
+    // file belongs to us, we can continue
+
     // no updates
     if (openInfo->eAccess == GA_Update) {
         CPLError(CE_Failure, CPLE_NotSupported,
@@ -62,7 +78,7 @@ GDALDataset* MaskDataset::Open(GDALOpenInfo *openInfo)
 
     // initialize dataset
     try {
-        return new MaskDataset(openInfo->pszFilename);
+        return new MaskDataset(openInfo->pszFilename, f);
     } catch (const std::runtime_error & e) {
         CPLError(CE_Failure, CPLE_IllegalArg
                  , "Dataset initialization failure (%s).\n", e.what());
@@ -70,19 +86,16 @@ GDALDataset* MaskDataset::Open(GDALOpenInfo *openInfo)
     }
 }
 
-MaskDataset::MaskDataset(const fs::path &path)
+MaskDataset::MaskDataset(const fs::path &path, std::ifstream &f)
     : tileSize_(256, 256)
 {
     auto maskOffset([&]() -> std::size_t
     {
-        utility::ifstreambuf f(path.string());
-
-        const char IO_MAGIC[6] = { 'G', 'D', 'A', 'L', 'Q', 'M' };;
-
-        char magic[6];
-        bin::read(f, magic);
-        if (std::memcmp(magic, IO_MAGIC, sizeof(IO_MAGIC))) {
-            throw std::runtime_error("Not a GDAL Quadtree Mask.");
+        // load reserved
+        {
+            std::uint8_t reserved;
+            bin::read(f, reserved);
+            bin::read(f, reserved);
         }
 
         {
@@ -116,19 +129,16 @@ MaskDataset::MaskDataset(const fs::path &path)
 
 CPLErr MaskDataset::GetGeoTransform(double *padfTransform)
 {
-#if 0
-    const auto extents(mask_.extents());
-    const auto resolution(mask_.resolution());
+    auto es(math::size(extents_));
 
-    padfTransform[0] = extents.ll(0);
-    padfTransform[1] = resolution(0) / double(tileSize_.width);
+    padfTransform[0] = extents_.ll(0);
+    padfTransform[1] = es.width / nRasterXSize;
     padfTransform[2] = 0.0;
 
-    padfTransform[3] = extents.ur(1);
+    padfTransform[3] = extents_.ur(1);
     padfTransform[4] = 0.0;
-    padfTransform[5] = -resolution(1) / double(tileSize_.height);
-#endif
-    (void) padfTransform;
+    padfTransform[5] = -es.height / nRasterYSize;;
+
     return CE_None;
 }
 
@@ -140,6 +150,7 @@ const char* MaskDataset::GetProjectionRef()
 /* RasterBand */
 
 MaskDataset::RasterBand::RasterBand(MaskDataset *dset)
+    : tileBounds_(0, 0, dset->tileSize_.width, dset->tileSize_.height)
 {
     poDS = dset;
     nBand = 1;
@@ -148,26 +159,50 @@ MaskDataset::RasterBand::RasterBand(MaskDataset *dset)
     eDataType = GDT_Byte;
 }
 
+namespace color {
+    cv::Scalar black(0x00);
+    cv::Scalar white(0xff);
+    cv::Scalar gray(0x80);
+} // namespace color
+
 CPLErr MaskDataset::RasterBand::IReadBlock(int blockCol, int blockRow
                                            , void *rawImage)
 {
-    (void) blockCol;
-    (void) blockRow;
-    (void) rawImage;
+    const auto &dset(*static_cast<MaskDataset*>(poDS));
 
-#if 0
-    auto &dset(*static_cast<MaskDataset*>(poDS));
+    const auto &ts(dset.tileSize_);
+    unsigned int xShift(blockCol * ts.width);
+    unsigned int yShift(blockRow * ts.height);
 
     try {
-        cv::Mat tile(dset.getTile({blockCol, blockRow}));
-        cv::Mat image(dset.tileSize_.height, dset.tileSize_.width
-                      , CV_8UC1, rawImage);
-        tile.copyTo(image);
+        // wrap tile into matrix and reset to to zero
+        cv::Mat tile(ts.height, ts.width, CV_8UC1, rawImage);
+        tile = cv::Scalar(color::black);
+
+        auto draw([&](unsigned int x, unsigned int y
+                      , unsigned int size, boost::tribool value)
+        {
+            // black -> nothing
+            if (!value) { return; }
+
+            x -= xShift;
+            y -= yShift;
+
+            // construct rectangle and intersect it with bounds
+            cv::Rect r(x, y, size, size);
+            auto rr(r & tileBounds_);
+
+            // draw white or gray rectangle
+            cv::rectangle(tile, rr
+                          , (value ? color::white : color::gray)
+                          , CV_FILLED, 4);
+        });
+
+        dset.mask_.forEachQuad(draw);
     } catch (const std::exception &e) {
         CPLError(CE_Failure, CPLE_FileIO, "%s\n", e.what());
         return CE_Failure;
     }
-#endif
     return CE_None;
 }
 

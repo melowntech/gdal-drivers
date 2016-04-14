@@ -7,6 +7,7 @@ set(gdal-drivers_SOURCES
   mapy-cz.hpp mapy-cz.cpp
   webmerc.hpp webmerc.cpp
   borderedarea.hpp borderedarea.cpp
+  mask.hpp mask.cpp
 
   detail/fetcher.hpp detail/fetcher.cpp
   detail/localcache.hpp detail/localcache.cpp

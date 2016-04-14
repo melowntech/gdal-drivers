@@ -31,14 +31,12 @@ namespace gdal_drivers {
 
 class MaskDataset::RasterBand : public GDALRasterBand {
 public:
-    RasterBand(MaskDataset *dset);
+    RasterBand(MaskDataset *dset, unsigned int depth);
 
     virtual CPLErr IReadBlock(int blockCol, int blockRow, void *image);
 
     virtual ~RasterBand() {};
 
-    /** 0 is special marker for no-data pixels
-     */
     virtual double GetNoDataValue(int *success = nullptr) {
         if (success) { *success = 1; }
         return 0.0;
@@ -46,7 +44,20 @@ public:
 
     virtual GDALColorInterp GetColorInterpretation() { return GCI_GrayIndex; }
 
+    virtual int GetOverviewCount() {
+        const auto &overviews(static_cast<MaskDataset*>(poDS)->overviews_);
+        return overviews->size();
+    }
+
+    virtual GDALRasterBand* GetOverview(int index) {
+        const auto &overviews(static_cast<MaskDataset*>(poDS)->overviews_);
+        if (index >= int(overviews->size())) { return nullptr; }
+        return &(*overviews)[index];
+    }
+
 private:
+    unsigned int depth_;
+    unsigned int tail_;
     cv::Rect tileBounds_;
 };
 
@@ -88,6 +99,7 @@ GDALDataset* MaskDataset::Open(GDALOpenInfo *openInfo)
 
 MaskDataset::MaskDataset(const fs::path &path, std::ifstream &f)
     : tileSize_(256, 256)
+    , overviews_(std::make_shared<RasterBands>())
 {
     auto maskOffset([&]() -> std::size_t
     {
@@ -124,7 +136,13 @@ MaskDataset::MaskDataset(const fs::path &path, std::ifstream &f)
     nRasterXSize = mask_.size().width;
     nRasterYSize = mask_.size().height;
 
-    SetBand(1, new RasterBand(this));
+    SetBand(1, new RasterBand(this, mask_.depth()));
+
+    auto depth(mask_.depth());
+    while (depth) {
+        --depth;
+        overviews_->emplace_back(this, depth);
+    }
 }
 
 CPLErr MaskDataset::GetGeoTransform(double *padfTransform)
@@ -149,14 +167,18 @@ const char* MaskDataset::GetProjectionRef()
 
 /* RasterBand */
 
-MaskDataset::RasterBand::RasterBand(MaskDataset *dset)
-    : tileBounds_(0, 0, dset->tileSize_.width, dset->tileSize_.height)
+MaskDataset::RasterBand::RasterBand(MaskDataset *dset, unsigned int depth)
+    : depth_(depth), tail_(dset->mask_.depth() - depth_)
+    , tileBounds_(0, 0, dset->tileSize_.width, dset->tileSize_.height)
 {
     poDS = dset;
     nBand = 1;
     nBlockXSize = dset->tileSize_.width;
     nBlockYSize = dset->tileSize_.height;
     eDataType = GDT_Byte;
+
+    nRasterXSize = dset->mask_.size().width >> tail_;
+    nRasterYSize = dset->mask_.size().height >> tail_;
 }
 
 namespace color {
@@ -185,6 +207,10 @@ CPLErr MaskDataset::RasterBand::IReadBlock(int blockCol, int blockRow
             // black -> nothing
             if (!value) { return; }
 
+            x >>= tail_;
+            y >>= tail_;
+            size >>= tail_;
+
             x -= xShift;
             y -= yShift;
 
@@ -198,7 +224,7 @@ CPLErr MaskDataset::RasterBand::IReadBlock(int blockCol, int blockRow
                           , CV_FILLED, 4);
         });
 
-        dset.mask_.forEachQuad(draw);
+        dset.mask_.forEachQuad(draw, depth_);
     } catch (const std::exception &e) {
         CPLError(CE_Failure, CPLE_FileIO, "%s\n", e.what());
         return CE_Failure;

@@ -12,14 +12,10 @@
 
 #include <gdal_priv.h>
 
-#include <map>
+#include <memory>
+#include <vector>
 
 #include <boost/filesystem/path.hpp>
-#include <boost/optional.hpp>
-
-#include <opencv2/core/core.hpp>
-
-#include <curl/curl.h>
 
 #include "math/geometry_core.hpp"
 #include "imgproc/rastermask/mappedqtree.hpp"
@@ -46,6 +42,7 @@ private:
 
     class RasterBand;
     friend class RasterBand;
+    typedef std::vector<RasterBand> RasterBands;
 
     typedef imgproc::mappedqtree::RasterMask Mask;
     Mask mask_;
@@ -53,10 +50,11 @@ private:
     std::string srs_;
     math::Extents2 extents_;
     math::Size2 tileSize_;
+
+    std::shared_ptr<RasterBands> overviews_;
 };
 
 } // namespace gdal_drivers
-
 
 // driver registration function
 CPL_C_START

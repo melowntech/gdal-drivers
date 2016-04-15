@@ -19,6 +19,7 @@
 
 #include "math/geometry_core.hpp"
 #include "imgproc/rastermask/mappedqtree.hpp"
+#include "geo/srsdef.hpp"
 
 namespace fs = boost::filesystem;
 
@@ -36,6 +37,13 @@ public:
 
     virtual CPLErr GetGeoTransform(double *padfTransform);
     virtual const char *GetProjectionRef();
+
+    /** Creates dataset from raster mask and extents.
+     */
+    static void create(const boost::filesystem::path &path
+                       , const imgproc::quadtree::RasterMask &mask
+                       , const math::Extents2 &extents
+                       , const geo::SrsDefinition &srs);
 
 private:
     MaskDataset(const fs::path &path, std::ifstream &f);

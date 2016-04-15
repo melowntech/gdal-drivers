@@ -51,6 +51,8 @@ public:
 
     friend class BorderedAreaRasterBand;
 
+    static void asMask(const fs::path &srcPath, const fs::path &dstPath);
+
 private:
     BorderedAreaDataset(const fs::path &root);
 

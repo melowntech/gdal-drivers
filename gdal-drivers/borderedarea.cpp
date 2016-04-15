@@ -19,6 +19,7 @@
 #include "imgproc/readimage.hpp"
 
 #include "./borderedarea.hpp"
+#include "./mask.hpp"
 
 namespace gdal_drivers {
 
@@ -206,6 +207,90 @@ CPLErr BorderedAreaRasterBand::IReadBlock(int blockCol, int blockRow
         return CE_Failure;
     }
     return CE_None;
+}
+
+namespace {
+
+template <typename T>
+int log2(T value)
+{
+    int depth(0);
+    while (!(value & 0x1)) {
+        value >>= 1;
+        ++depth;
+    }
+
+    if (value == 0x1) {
+        // exactly one bit set -> is a binlog
+        return depth;
+    }
+
+    LOGTHROW(err3, std::runtime_error)
+        << "Value " << value << " is not an power of 2.";
+    throw;
+}
+
+} // namespace
+
+void BorderedAreaDataset::asMask(const fs::path &srcPath
+                                 , const fs::path &dstPath)
+{
+    std::unique_ptr<BorderedAreaDataset> rds
+        (dynamic_cast<BorderedAreaDataset*>
+         (static_cast< ::GDALDataset*>
+          (::GDALOpen(srcPath.c_str(), GA_ReadOnly))));
+
+    if (!rds) {
+        LOGTHROW(err2, std::runtime_error)
+            << srcPath << " is not a BorderedArea dataset.";
+    }
+
+    auto &ds(*rds);
+
+    const auto &tileSize(ds.tileSize_);
+    if (!tileSize.width || !tileSize.height) {
+        LOGTHROW(err3, std::runtime_error) << "Tile is not a square.";
+    }
+
+    auto tileDepth(log2(tileSize.width));
+    typedef imgproc::quadtree::RasterMask Mask;
+    math::Size2 size(ds.nRasterXSize, ds.nRasterYSize);
+
+    typedef imgproc::quadtree::RasterMask Mask;
+    Mask mask(size, Mask::InitMode::EMPTY);
+    auto gridDepth(mask.depth() - tileDepth);
+
+    auto rastertize([&](int x, int y, const cv::Mat &tile)
+    {
+        for (int j(0), je(tile.rows); j < je; ++j) {
+            for (int i(0), ie(tile.cols); i < ie; ++i) {
+                if (tile.at<std::uint8_t>(j, i)) {
+                    mask.set(x + i, y + j);
+                }
+            }
+        }
+    });
+
+    const auto& data(ds.mask_.cdata());
+    for (int j(0), je(data.rows); j < je; ++j) {
+        LOG(info3) << "Processing row " << j << ".";
+        for (int i(0), ie(data.cols); i < ie; ++i) {
+            auto value(data.at<double>(j, i));
+            if (value == 0xff) {
+                // full white tile, set whole square at grid depth
+                mask.setQuad(gridDepth, i, j);
+            } else if (!value) {
+                // black -> pass
+            } else {
+                // gray -> load tile and save to mask
+                rastertize(i * tileSize.width, j * tileSize.height
+                           , ds.getTile(math::Point2i(i, j)));
+            }
+        }
+    }
+
+    gdal_drivers::MaskDataset::create
+        (dstPath, mask, ds.mask_.extents(), ds.mask_.srs());
 }
 
 } // namespace gdal_drivers

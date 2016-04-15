@@ -18,3 +18,7 @@ buildsys_library(gdal-drivers)
 
 target_link_libraries(gdal-drivers ${MODULE_LIBRARIES})
 buildsys_target_compile_definitions(gdal-drivers ${MODULE_DEFINITIONS})
+
+if(MODULE_service_FOUND)
+  add_subdirectory(tools EXCLUDE_FROM_ALL)
+endif()

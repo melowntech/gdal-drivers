@@ -17,6 +17,7 @@
 
 #include "utility/streams.hpp"
 #include "utility/binaryio.hpp"
+#include "imgproc/rastermask/quadtree.hpp"
 
 #include "./mask.hpp"
 
@@ -24,6 +25,10 @@ namespace fs = boost::filesystem;
 namespace bin = utility::binaryio;
 
 namespace gdal_drivers {
+
+namespace {
+    const char IO_MAGIC[6] = { 'G', 'D', 'A', 'L', 'Q', 'M' };
+} // namespace
 
 /**
  * @brief BorderedAreaRasterBand
@@ -69,7 +74,6 @@ GDALDataset* MaskDataset::Open(GDALOpenInfo *openInfo)
     utility::ifstreambuf f;
     try {
         f.open(openInfo->pszFilename);
-        const char IO_MAGIC[6] = { 'G', 'D', 'A', 'L', 'Q', 'M' };
         char magic[6];
         bin::read(f, magic);
         if (std::memcmp(magic, IO_MAGIC, sizeof(IO_MAGIC))) {
@@ -235,6 +239,49 @@ CPLErr MaskDataset::RasterBand::IReadBlock(int blockCol, int blockRow
         return CE_Failure;
     }
     return CE_None;
+}
+
+void MaskDataset::create(const boost::filesystem::path &path
+                         , const imgproc::quadtree::RasterMask &mask
+                         , const math::Extents2 &extents
+                         , const geo::SrsDefinition &srs)
+{
+    utility::ofstreambuf f(path.string());
+
+    bin::write(f, IO_MAGIC); // 6 bytes
+    bin::write(f, uint8_t(0)); // reserved
+    bin::write(f, uint8_t(0)); // reserved
+
+    // write SRS
+    {
+        auto srsWkt(srs.as(geo::SrsDefinition::Type::wkt).srs);
+        bin::write(f, std::uint32_t(srsWkt.size()));
+        bin::write(f, srsWkt.data(), srsWkt.size());
+    }
+
+    // update extents to to square
+    auto sExtents(extents);
+    {
+        // input raster size
+        auto mSize(mask.size());
+        // square raster size
+        auto sSize(1 << mask.depth());
+        // extents size
+        auto es(math::size(extents));
+        // update extents to be square
+        sExtents.ur(0) = sExtents.ll(0) + ((es.width * sSize) / mSize.width);
+        sExtents.ll(1) = sExtents.ur(1) - ((es.height * sSize) / mSize.height);
+    }
+
+    // write extents
+    bin::write(f, double(sExtents.ll(0)));
+    bin::write(f, double(sExtents.ll(1)));
+    bin::write(f, double(sExtents.ur(0)));
+    bin::write(f, double(sExtents.ur(1)));
+
+    // write mask
+    imgproc::mappedqtree::RasterMask::write(f, mask);
+    f.close();
 }
 
 } // namespace gdal_drivers

@@ -43,7 +43,10 @@ public:
     static void create(const boost::filesystem::path &path
                        , const imgproc::quadtree::RasterMask &mask
                        , const math::Extents2 &extents
-                       , const geo::SrsDefinition &srs);
+                       , const geo::SrsDefinition &srs
+                       , unsigned int depth = 0
+                       , unsigned int x = 0
+                       , unsigned int y = 0);
 
 private:
     MaskDataset(const fs::path &path, std::ifstream &f);

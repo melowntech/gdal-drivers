@@ -244,7 +244,8 @@ CPLErr MaskDataset::RasterBand::IReadBlock(int blockCol, int blockRow
 void MaskDataset::create(const boost::filesystem::path &path
                          , const imgproc::quadtree::RasterMask &mask
                          , const math::Extents2 &extents
-                         , const geo::SrsDefinition &srs)
+                         , const geo::SrsDefinition &srs
+                         , unsigned int depth, unsigned int x, unsigned int y)
 {
     utility::ofstreambuf f(path.string());
 
@@ -280,7 +281,7 @@ void MaskDataset::create(const boost::filesystem::path &path
     bin::write(f, double(sExtents.ur(1)));
 
     // write mask
-    imgproc::mappedqtree::RasterMask::write(f, mask);
+    imgproc::mappedqtree::RasterMask::write(f, mask, depth, x, y);
     f.close();
 }
 

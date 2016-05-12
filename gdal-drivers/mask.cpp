@@ -212,21 +212,19 @@ CPLErr MaskDataset::RasterBand::IReadBlock(int blockCol, int blockRow
         cv::Mat tile(ts.height, ts.width, CV_8UC1, rawImage);
         tile = cv::Scalar(color::black);
 
-        auto draw([&](int x, int y
-                      , unsigned int size, boost::tribool value)
+        auto draw([&](Mask::Node node, boost::tribool value)
         {
             // black -> nothing
             if (!value) { return; }
 
-            x >>= tail_;
-            y >>= tail_;
-            size >>= tail_;
+            // update to match level grid
+            node.shift(tail_);
 
-            x -= xShift;
-            y -= yShift;
+            node.x -= xShift;
+            node.y -= yShift;
 
             // construct rectangle and intersect it with bounds
-            cv::Rect r(x, y, size, size);
+            cv::Rect r(node.x, node.y, node.size, node.size);
             auto rr(r & tileBounds_);
             cv::rectangle(tile, rr
                           , (value ? color::white : color::gray)

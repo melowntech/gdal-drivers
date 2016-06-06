@@ -1,4 +1,6 @@
-define_module(LIBRARY gdal-drivers DEPENDS geo jsoncpp CURL)
+define_module(LIBRARY gdal-drivers DEPENDS
+  geo jsoncpp CURL
+  Boost_PROGRAM_OPTIONS)
 
 set(gdal-drivers_SOURCES
   register.hpp register.cpp
@@ -8,6 +10,7 @@ set(gdal-drivers_SOURCES
   webmerc.hpp webmerc.cpp
   borderedarea.hpp borderedarea.cpp
   mask.hpp mask.cpp
+  solid.hpp solid.cpp
 
   detail/fetcher.hpp detail/fetcher.cpp
   detail/localcache.hpp detail/localcache.cpp

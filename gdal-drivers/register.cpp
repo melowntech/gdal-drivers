@@ -3,6 +3,7 @@
 #include "./gttdataset.hpp"
 #include "./borderedarea.hpp"
 #include "./mask.hpp"
+#include "./solid.hpp"
 
 namespace gdal_drivers {
 
@@ -14,6 +15,7 @@ void registerAll()
     GDALRegister_Gtt();
     GDALRegister_BorderedArea();
     GDALRegister_MaskDataset();
+    GDALRegister_SolidDataset();
 }
 
 } // namespace gdal_drivers

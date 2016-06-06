@@ -61,7 +61,8 @@ private:
     void fill(T *array)
     {
         auto &dset(*static_cast<SolidDataset*>(poDS));
-        const T value(dset.config_.value); count(math::area(dset.tileSize_));
+        const T value(dset.config_.value);
+        auto count(math::area(dset.tileSize_));
         std::fill(array, array + count, value);
     }
 

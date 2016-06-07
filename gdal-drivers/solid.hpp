@@ -36,8 +36,16 @@ private:
         geo::SrsDefinition srs;
         math::Size2 size;
         math::Extents2 extents;
-        double value;
-        ::GDALDataType dataType;
+        math::Size2 tileSize;
+
+        struct Band {
+            double value;
+            ::GDALDataType dataType;
+            ::GDALColorInterp colorInterpretation;
+
+            typedef std::vector<Band> list;
+        };
+        Band::list bands;
     };
 
     SolidDataset(const Config &config);
@@ -48,8 +56,6 @@ private:
 
     Config config_;
     std::string srs_;
-    math::Size2 tileSize_;
-    std::shared_ptr<RasterBands> overviews_;
 };
 
 } // namespace gdal_drivers

@@ -13,6 +13,8 @@
 #include <memory>
 #include <vector>
 
+#include <boost/filesystem/path.hpp>
+
 #include "math/geometry_core.hpp"
 #include "geo/srsdef.hpp"
 
@@ -31,7 +33,6 @@ public:
     virtual CPLErr GetGeoTransform(double *padfTransform);
     virtual const char *GetProjectionRef();
 
-private:
     struct Config {
         geo::SrsDefinition srs;
         math::Size2 size;
@@ -44,10 +45,20 @@ private:
             ::GDALColorInterp colorInterpretation;
 
             typedef std::vector<Band> list;
+
+            Band() : value() {}
         };
         Band::list bands;
+
+        Config() : tileSize(256, 256) {}
     };
 
+    /** Creates new solid dataset and return pointer to it.
+     */
+    static std::unique_ptr<SolidDataset>
+    create(const boost::filesystem::path &path, const Config &config);
+
+private:
     SolidDataset(const Config &config);
 
     class RasterBand;

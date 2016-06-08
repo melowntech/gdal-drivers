@@ -294,6 +294,41 @@ CPLErr SolidDataset::RasterBand::IReadBlock(int, int, void *rawImage)
     return CE_None;
 }
 
+void writeConfig(const boost::filesystem::path &file
+                 , const SolidDataset::Config &config)
+{
+    std::ofstream f;
+    f.exceptions(std::ios::badbit | std::ios::failbit);
+    f.open(file.string(), std::ios_base::out | std::ios_base::trunc);
+
+    f << std::fixed;
+
+    f << "[solid]"
+      << "\nsrs = " << config.srs
+      << "\nsize = " << config.size
+      << "\nextents = " << config.extents
+      << "\ntileSize = " << config.tileSize
+      << "\n";
+
+    for (const auto &band : config.bands) {
+        f << "\n[band]"
+          << "\nvalue = " << band.value
+          << "\ndataType = " << band.dataType
+          << "\ncolorInterpretation = " << band.colorInterpretation
+          << "\n";
+    }
+
+    f.close();
+}
+
+std::unique_ptr<SolidDataset>
+SolidDataset::create(const boost::filesystem::path &path, const Config &config)
+{
+    std::unique_ptr<SolidDataset> solid(new SolidDataset(config));
+    writeConfig(path, config);
+    return solid;
+}
+
 } // namespace gdal_drivers
 
 /* GDALRegister_SolidDataset */

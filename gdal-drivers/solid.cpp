@@ -7,11 +7,13 @@
 #include <vector>
 #include <iterator>
 #include <fstream>
+#include <iomanip>
 
 #include "dbglog/dbglog.hpp"
 
 #include "utility/raise.hpp"
 #include "utility/multivalue.hpp"
+#include "utility/streams.hpp"
 #include "geo/gdal.hpp"
 #include "geo/po.hpp"
 
@@ -103,6 +105,33 @@ private:
     std::vector< ::GDALRasterBand*> ovrBands_;
 };
 
+namespace {
+
+struct GeoTransformWrapper {
+    geo::GeoTransform value;
+};
+
+template<typename CharT, typename Traits>
+inline std::basic_istream<CharT, Traits>&
+operator>>(std::basic_istream<CharT, Traits> &is, GeoTransformWrapper &g)
+{
+    auto &v(g.value);
+    auto comma(utility::expect<CharT>(','));
+    return is >> v[0] >> comma >> v[1] >> comma >> v[2]
+              >> comma >> v[3] >> comma >> v[4] >> comma >> v[5];
+}
+
+template<typename CharT, typename Traits>
+inline std::basic_ostream<CharT, Traits>&
+operator<<(std::basic_ostream<CharT, Traits> &os, const GeoTransformWrapper &g)
+{
+    const auto &v(g.value);
+    return os << v[0] << ',' << v[1] << ',' << v[2]
+              << ',' << v[3] << ',' << v[4] << ',' << v[5];
+}
+
+} // namespace
+
 GDALDataset* SolidDataset::Open(GDALOpenInfo *openInfo)
 {
     ::CPLErrorReset();
@@ -116,8 +145,10 @@ GDALDataset* SolidDataset::Open(GDALOpenInfo *openInfo)
          , "SRS definition. Use [WKT], +proj or EPSG:num.")
         ("solid.size", po::value(&cfg.size)->required()
          , "Size of dataset (WxH).")
-        ("solid.extents", po::value(&cfg.extents)->required()
+        ("solid.extents", po::value<math::Extents2>()
          , "Geo extents of dataset (ulx,uly:urx,ury).")
+        ("solid.geoTransform", po::value<GeoTransformWrapper>()
+         , "Geo transform matrix (m00, m01, m02, m10, m11, m12).")
         ("solid.tileSize", po::value(&cfg.tileSize)
          ->default_value(math::Size2(256, 256))->required()
          , "Tile size.")
@@ -144,6 +175,10 @@ GDALDataset* SolidDataset::Open(GDALOpenInfo *openInfo)
         f.open(openInfo->pszFilename);
         f.exceptions(std::ifstream::badbit);
         parsed = (po::parse_config_file(f, config));
+        if (parsed.options.empty()) {
+            // structure valid but nothing read -> not a solid file
+            return nullptr;
+        }
     } catch (...) { return nullptr; }
 
     // no updates
@@ -158,6 +193,29 @@ GDALDataset* SolidDataset::Open(GDALOpenInfo *openInfo)
     try {
         po::store(parsed, vm);
         po::notify(vm);
+
+        bool hasExtents(vm.count("solid.extents"));
+        bool hasGeoTransform(vm.count("solid.geoTransform"));
+
+        if (hasExtents && hasGeoTransform) {
+            CPLError(CE_Failure, CPLE_IllegalArg
+                     , "SolidDataset initialization failure:"
+                     " both extents and geoTransform are set.\n");
+            return nullptr;
+        }
+        if (!hasExtents && !hasGeoTransform) {
+            CPLError(CE_Failure, CPLE_IllegalArg
+                     , "SolidDataset initialization failure:"
+                     " both extents and geoTransform are unset.\n");
+            return nullptr;
+        }
+
+        if (hasExtents) {
+            cfg.extents(vm["solid.extents"].as<math::Extents2>());
+        } else {
+            cfg.geoTransform
+                (vm["solid.geoTransform"].as<GeoTransformWrapper>().value);
+        }
 
         // process bands
         auto &bands(cfg.bands);
@@ -181,6 +239,21 @@ SolidDataset::SolidDataset(const Config &config)
     : config_(config)
     , srs_(config.srs.as(geo::SrsDefinition::Type::wkt).srs)
 {
+    if (const auto *extents = config_.extents()) {
+        const auto &e(*extents);
+        auto es(math::size(e));
+
+        geoTransform_[0] = e.ll(0);
+        geoTransform_[1] = es.width / nRasterXSize;
+        geoTransform_[2] = 0.0;
+
+        geoTransform_[3] = e.ur(1);
+        geoTransform_[4] = 0.0;
+        geoTransform_[5] = -es.height / nRasterYSize;;
+    } else if (const auto *geoTransform = config_.geoTransform()) {
+        geoTransform_ = *geoTransform;
+    }
+
     nRasterXSize = config_.size.width;
     nRasterYSize = config_.size.height;
 
@@ -213,16 +286,9 @@ SolidDataset::SolidDataset(const Config &config)
 
 CPLErr SolidDataset::GetGeoTransform(double *padfTransform)
 {
-    const auto &e(config_.extents);
-    auto es(math::size(e));
-
-    padfTransform[0] = e.ll(0);
-    padfTransform[1] = es.width / nRasterXSize;
-    padfTransform[2] = 0.0;
-
-    padfTransform[3] = e.ur(1);
-    padfTransform[4] = 0.0;
-    padfTransform[5] = -es.height / nRasterYSize;;
+    std::copy(geoTransform_.begin(), geoTransform_.end()
+              , padfTransform);
+    return CE_None;
 
     return CE_None;
 }
@@ -294,6 +360,16 @@ CPLErr SolidDataset::RasterBand::IReadBlock(int, int, void *rawImage)
     return CE_None;
 }
 
+const math::Extents2* SolidDataset::Config::extents() const
+{
+    return boost::get<math::Extents2>(&extentsOrGeoTransform);
+}
+
+const geo::GeoTransform* SolidDataset::Config::geoTransform() const
+{
+    return boost::get<geo::GeoTransform>(&extentsOrGeoTransform);
+}
+
 void writeConfig(const boost::filesystem::path &file
                  , const SolidDataset::Config &config)
 {
@@ -301,15 +377,25 @@ void writeConfig(const boost::filesystem::path &file
     f.exceptions(std::ios::badbit | std::ios::failbit);
     f.open(file.string(), std::ios_base::out | std::ios_base::trunc);
 
-    f << std::fixed;
+    f << std::scientific << std::setprecision(16);
 
     f << "[solid]"
       << "\nsrs = " << config.srs
       << "\nsize = " << config.size
-      << "\nextents = " << config.extents
       << "\ntileSize = " << config.tileSize
-      << "\n";
+        ;
 
+    if (const auto *extents = config.extents()) {
+        f << "\nextents = " << *extents;
+    } if (const auto *geoTransform = config.geoTransform()) {
+        f << "\ngeoTransform = " << GeoTransformWrapper{*geoTransform};
+    } else {
+        LOGTHROW(err1, std::runtime_error)
+            << "Neither extents nor geoTransform are set.";
+    }
+    f << "\n\n";
+
+    f.unsetf(std::ios_base::floatfield);
     for (const auto &band : config.bands) {
         f << "\n[band]"
           << "\nvalue = " << band.value

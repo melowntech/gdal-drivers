@@ -11,12 +11,15 @@
 #include <gdal_priv.h>
 
 #include <memory>
+#include <array>
 #include <vector>
 
+#include <boost/variant.hpp>
 #include <boost/filesystem/path.hpp>
 
 #include "math/geometry_core.hpp"
 #include "geo/srsdef.hpp"
+#include "geo/geotransform.hpp"
 
 namespace gdal_drivers {
 
@@ -33,10 +36,10 @@ public:
     virtual CPLErr GetGeoTransform(double *padfTransform);
     virtual const char *GetProjectionRef();
 
-    struct Config {
+    class Config {
+    public:
         geo::SrsDefinition srs;
         math::Size2 size;
-        math::Extents2 extents;
         math::Size2 tileSize;
 
         struct Band {
@@ -51,6 +54,20 @@ public:
         Band::list bands;
 
         Config() : tileSize(256, 256) {}
+
+        void extents(const math::Extents2 &e) {
+            extentsOrGeoTransform = e;
+        }
+        const math::Extents2* extents() const;
+
+        void geoTransform(const geo::GeoTransform &g) {
+            extentsOrGeoTransform = g;
+        }
+        const geo::GeoTransform* geoTransform() const;
+
+    private:
+        boost::variant<math::Extents2, geo::GeoTransform>
+        extentsOrGeoTransform;
     };
 
     /** Creates new solid dataset and return pointer to it.
@@ -67,6 +84,7 @@ private:
 
     Config config_;
     std::string srs_;
+    geo::GeoTransform geoTransform_;
 };
 
 } // namespace gdal_drivers

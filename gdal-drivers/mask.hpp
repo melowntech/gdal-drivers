@@ -53,7 +53,6 @@ private:
 
     class RasterBand;
     friend class RasterBand;
-    typedef std::vector<RasterBand> RasterBands;
 
     typedef imgproc::mappedqtree::RasterMask Mask;
     Mask mask_;
@@ -62,7 +61,8 @@ private:
     math::Extents2 extents_;
     math::Size2 tileSize_;
 
-    std::shared_ptr<RasterBands> overviews_;
+    typedef std::vector<std::shared_ptr<RasterBand> > RasterBands;
+    RasterBands overviews_;
 };
 
 } // namespace gdal_drivers

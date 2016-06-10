@@ -16,7 +16,7 @@
 #ifndef gdal_drivers_register_hpp_included_
 #define gdal_drivers_register_hpp_included_
 
-#include <gdal/cpl_port.h>
+#include <cpl_port.h>
 
 namespace gdal_drivers {
     void registerAll();

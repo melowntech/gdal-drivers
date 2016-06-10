@@ -51,13 +51,13 @@ public:
 
     virtual int GetOverviewCount() {
         const auto &overviews(static_cast<MaskDataset*>(poDS)->overviews_);
-        return overviews->size();
+        return overviews.size();
     }
 
     virtual GDALRasterBand* GetOverview(int index) {
         const auto &overviews(static_cast<MaskDataset*>(poDS)->overviews_);
-        if (index >= int(overviews->size())) { return nullptr; }
-        return &(*overviews)[index];
+        if (index >= int(overviews.size())) { return nullptr; }
+        return overviews[index].get();
     }
 
 private:
@@ -103,7 +103,6 @@ GDALDataset* MaskDataset::Open(GDALOpenInfo *openInfo)
 
 MaskDataset::MaskDataset(const fs::path &path, std::ifstream &f)
     : tileSize_(256, 256)
-    , overviews_(std::make_shared<RasterBands>())
 {
     auto maskOffset([&]() -> std::size_t
     {
@@ -145,7 +144,7 @@ MaskDataset::MaskDataset(const fs::path &path, std::ifstream &f)
     auto depth(mask_.depth());
     while (depth) {
         --depth;
-        overviews_->emplace_back(this, depth);
+        overviews_.push_back(std::make_shared<RasterBand>(this, depth));
     }
 }
 

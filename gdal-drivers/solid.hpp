@@ -29,7 +29,12 @@ namespace gdal_drivers {
 
 class SolidDataset : public GDALDataset {
 public:
-    static GDALDataset* Open(GDALOpenInfo *openInfo);
+    static ::GDALDataset* Open(GDALOpenInfo *openInfo);
+
+    static ::GDALDataset* CreateCopy(const char *path, ::GDALDataset *src
+                                     , int strict, char **options
+                                     , GDALProgressFunc progress
+                                     , void *progressData);
 
     virtual ~SolidDataset() {};
 
@@ -50,6 +55,11 @@ public:
             typedef std::vector<Band> list;
 
             Band() : value() {}
+            Band(double value, ::GDALDataType dataType
+                 , ::GDALColorInterp colorInterpretation)
+                : value(value), dataType(dataType)
+                , colorInterpretation(colorInterpretation)
+            {}
         };
         Band::list bands;
 

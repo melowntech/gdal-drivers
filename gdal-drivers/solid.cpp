@@ -23,6 +23,70 @@ namespace po = boost::program_options;
 
 namespace gdal_drivers {
 
+namespace {
+
+struct GeoTransformWrapper {
+    geo::GeoTransform value;
+};
+
+template<typename CharT, typename Traits>
+inline std::basic_istream<CharT, Traits>&
+operator>>(std::basic_istream<CharT, Traits> &is, GeoTransformWrapper &g)
+{
+    auto &v(g.value);
+    auto comma(utility::expect<CharT>(','));
+    return is >> v[0] >> comma >> v[1] >> comma >> v[2]
+              >> comma >> v[3] >> comma >> v[4] >> comma >> v[5];
+}
+
+template<typename CharT, typename Traits>
+inline std::basic_ostream<CharT, Traits>&
+operator<<(std::basic_ostream<CharT, Traits> &os, const GeoTransformWrapper &g)
+{
+    const auto &v(g.value);
+    return os << v[0] << ',' << v[1] << ',' << v[2]
+              << ',' << v[3] << ',' << v[4] << ',' << v[5];
+}
+
+} // namespace
+
+void writeConfig(const boost::filesystem::path &file
+                 , const SolidDataset::Config &config)
+{
+    std::ofstream f;
+    f.exceptions(std::ios::badbit | std::ios::failbit);
+    f.open(file.string(), std::ios_base::out | std::ios_base::trunc);
+
+    f << std::scientific << std::setprecision(16);
+
+    f << "[solid]"
+      << "\nsrs = " << config.srs
+      << "\nsize = " << config.size
+      << "\ntileSize = " << config.tileSize
+        ;
+
+    if (const auto *extents = config.extents()) {
+        f << "\nextents = " << *extents;
+    } if (const auto *geoTransform = config.geoTransform()) {
+        f << "\ngeoTransform = " << GeoTransformWrapper{*geoTransform};
+    } else {
+        LOGTHROW(err1, std::runtime_error)
+            << "Neither extents nor geoTransform are set.";
+    }
+    f << "\n\n";
+
+    f.unsetf(std::ios_base::floatfield);
+    for (const auto &band : config.bands) {
+        f << "\n[band]"
+          << "\nvalue = " << band.value
+          << "\ndataType = " << band.dataType
+          << "\ncolorInterpretation = " << band.colorInterpretation
+          << "\n";
+    }
+
+    f.close();
+}
+
 /**
  * @brief BorderedAreaRasterBand
  */
@@ -104,33 +168,6 @@ private:
     std::vector<math::Size2> overviews_;
     std::vector< ::GDALRasterBand*> ovrBands_;
 };
-
-namespace {
-
-struct GeoTransformWrapper {
-    geo::GeoTransform value;
-};
-
-template<typename CharT, typename Traits>
-inline std::basic_istream<CharT, Traits>&
-operator>>(std::basic_istream<CharT, Traits> &is, GeoTransformWrapper &g)
-{
-    auto &v(g.value);
-    auto comma(utility::expect<CharT>(','));
-    return is >> v[0] >> comma >> v[1] >> comma >> v[2]
-              >> comma >> v[3] >> comma >> v[4] >> comma >> v[5];
-}
-
-template<typename CharT, typename Traits>
-inline std::basic_ostream<CharT, Traits>&
-operator<<(std::basic_ostream<CharT, Traits> &os, const GeoTransformWrapper &g)
-{
-    const auto &v(g.value);
-    return os << v[0] << ',' << v[1] << ',' << v[2]
-              << ',' << v[3] << ',' << v[4] << ',' << v[5];
-}
-
-} // namespace
 
 GDALDataset* SolidDataset::Open(GDALOpenInfo *openInfo)
 {
@@ -233,6 +270,60 @@ GDALDataset* SolidDataset::Open(GDALOpenInfo *openInfo)
                  , "SolidDataset initialization failure (%s).\n", e.what());
         return nullptr;
     }
+}
+
+GDALDataset* SolidDataset::CreateCopy(const char *path
+                                      , GDALDataset *src
+                                      , int strict
+                                      , char **options
+                                      , GDALProgressFunc, void *)
+{
+    auto bands(src->GetRasterCount());
+
+    std::vector<double> colors(bands, 0);
+    {
+        auto **rawColors(CSLFetchNameValueMultiple(options, "COLOR"));
+        for (auto &color : colors) {
+            if (!rawColors) { break; }
+
+            try {
+                color = boost::lexical_cast<double>(*rawColors);
+            } catch (...) {
+                CPLError(CE_Failure, CPLE_IllegalArg
+                         , "SolidDataset create failure:"
+                         " invalid color value %s.\n", *rawColors);
+                return nullptr;
+            }
+
+            ++rawColors;
+        }
+    }
+
+    Config config;
+    // copy SRS
+    config.srs = geo::SrsDefinition
+        (src->GetProjectionRef(), geo::SrsDefinition::Type::wkt);
+
+    // copy raster size
+    config.size.width = src->GetRasterXSize();
+    config.size.height = src->GetRasterYSize();
+
+    // copy geo transformation
+    geo::GeoTransform gt;
+    src->GetGeoTransform(gt.data());
+    config.geoTransform(gt);
+
+    // copy bands
+    for (int i(1); i <= bands; ++i) {
+        auto *b(src->GetRasterBand(i));
+        config.bands.emplace_back(colors[i - 1], b->GetRasterDataType()
+                                  , b->GetColorInterpretation());
+    }
+
+    writeConfig(path, config);
+    return new SolidDataset(config);
+
+    (void) strict;
 }
 
 SolidDataset::SolidDataset(const Config &config)
@@ -370,43 +461,6 @@ const geo::GeoTransform* SolidDataset::Config::geoTransform() const
     return boost::get<geo::GeoTransform>(&extentsOrGeoTransform);
 }
 
-void writeConfig(const boost::filesystem::path &file
-                 , const SolidDataset::Config &config)
-{
-    std::ofstream f;
-    f.exceptions(std::ios::badbit | std::ios::failbit);
-    f.open(file.string(), std::ios_base::out | std::ios_base::trunc);
-
-    f << std::scientific << std::setprecision(16);
-
-    f << "[solid]"
-      << "\nsrs = " << config.srs
-      << "\nsize = " << config.size
-      << "\ntileSize = " << config.tileSize
-        ;
-
-    if (const auto *extents = config.extents()) {
-        f << "\nextents = " << *extents;
-    } if (const auto *geoTransform = config.geoTransform()) {
-        f << "\ngeoTransform = " << GeoTransformWrapper{*geoTransform};
-    } else {
-        LOGTHROW(err1, std::runtime_error)
-            << "Neither extents nor geoTransform are set.";
-    }
-    f << "\n\n";
-
-    f.unsetf(std::ios_base::floatfield);
-    for (const auto &band : config.bands) {
-        f << "\n[band]"
-          << "\nvalue = " << band.value
-          << "\ndataType = " << band.dataType
-          << "\ncolorInterpretation = " << band.colorInterpretation
-          << "\n";
-    }
-
-    f.close();
-}
-
 std::unique_ptr<SolidDataset>
 SolidDataset::create(const boost::filesystem::path &path, const Config &config)
 {
@@ -431,6 +485,7 @@ void GDALRegister_SolidDataset()
         driver->SetMetadataItem(GDAL_DMD_EXTENSION, "");
 
         driver->pfnOpen = gdal_drivers::SolidDataset::Open;
+        driver->pfnCreateCopy = gdal_drivers::SolidDataset::CreateCopy;
 
         GetGDALDriverManager()->RegisterDriver(driver.release());
     }

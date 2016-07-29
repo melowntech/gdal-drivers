@@ -4,6 +4,7 @@
 #include "./borderedarea.hpp"
 #include "./mask.hpp"
 #include "./solid.hpp"
+#include "./mvt.hpp"
 
 namespace gdal_drivers {
 
@@ -16,6 +17,7 @@ void registerAll()
     GDALRegister_BorderedArea();
     GDALRegister_MaskDataset();
     GDALRegister_SolidDataset();
+    GDALRegister_MvtDataset();
 }
 
 } // namespace gdal_drivers

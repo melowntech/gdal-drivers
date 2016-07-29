@@ -1,5 +1,5 @@
 define_module(LIBRARY gdal-drivers DEPENDS
-  geo jsoncpp CURL
+  geo jsoncpp CURL PROTOBUF
   Boost_PROGRAM_OPTIONS)
 
 set(gdal-drivers_SOURCES
@@ -12,11 +12,18 @@ set(gdal-drivers_SOURCES
   mask.hpp mask.cpp
   solid.hpp solid.cpp
 
+  mvt.hpp mvt.cpp
+
   detail/fetcher.hpp detail/fetcher.cpp
   detail/localcache.hpp detail/localcache.cpp
 )
 
-add_library(gdal-drivers STATIC ${gdal-drivers_SOURCES})
+protobuf_generate_cpp(gdal-drivers_PROTO_SOURCES gdal-drivers_PROTO_HDRS
+  proto/vector_tile.proto)
+
+add_library(gdal-drivers
+  STATIC ${gdal-drivers_SOURCES}
+  ${gdal-drivers_PROTO_SOURCES})
 buildsys_library(gdal-drivers)
 
 target_link_libraries(gdal-drivers ${MODULE_LIBRARIES})

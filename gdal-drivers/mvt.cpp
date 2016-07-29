@@ -43,10 +43,10 @@ public:
         } else {
             shift_(1) = 1.0;
             scale_.width = 1.0 / extent;
-            scale_.height = 1.0 / extent;
+            scale_.height = -1.0 / extent;
         }
     }
-#if 0
+
     inline double x(std::uint32_t value) const {
         return value * scale_.width + shift_(0);
     }
@@ -54,10 +54,6 @@ public:
     inline double y(std::uint32_t value) const {
         return value * scale_.height + shift_(1);
     }
-#endif
-    inline double x(std::uint32_t value) const { return value; }
-
-    inline double y(std::uint32_t value) const { return value; }
 
 private:
     math::Point2d shift_;
@@ -134,11 +130,40 @@ OGRwkbGeometryType type(vector_tile::Tile_GeomType type)
 typedef decltype(vector_tile::Tile_Feature().geometry()) MvtGeometry;
 
 struct Cursor {
-    std::uint32_t x;
-    std::uint32_t y;
+    std::int32_t x;
+    std::int32_t y;
 
     Cursor() : x(), y() {}
 };
+
+struct Command {
+    enum class Type { moveTo = 1, lineTo = 2, closePath = 7 };
+    Type type;
+    std::uint32_t count;
+
+    Command(const std::uint32_t &raw)
+        : type(static_cast<Type>(raw & 0x7)), count(raw >> 3)
+    {}
+};
+
+
+std::ostream& operator<<(std::ostream &os, const Command::Type &t)
+{
+    switch (t) {
+    case Command::Type::moveTo:
+        return os << "moveTo";
+
+    case Command::Type::lineTo:
+        return os << "lineTo";
+
+    case Command::Type::closePath:
+        return os << "closePath";
+
+    default:
+        return os << "unknown";
+    }
+    return os;
+}
 
 class GeometryReader : public Trafo {
 public:
@@ -147,45 +172,18 @@ public:
         , source_(source), pos_(source_.begin()), end_(source_.end())
     {}
 
-    struct Command {
-        enum class Type {  moveTo = 1, lineTo = 2, closePath = 7 };
-        Type type;
-        std::uint32_t count;
-
-        Command(const std::uint32_t &raw)
-            : type(static_cast<Type>(raw & 0x7)), count(raw >> 3)
-        {}
-    };
+    ~GeometryReader() {
+        if (!std::uncaught_exception()) {
+            if (pos_ != end_) {
+                LOG(warn1) << "Not all geometry input consumed.";
+            }
+        }
+    }
 
     operator bool() const { return pos_ != end_; }
 
-    Command command(Command::Type type) {
-        if (pos_ == end_) {
-            LOGTHROW(err1, std::runtime_error)
-                << "Cannot read command past the end of input.";
-        }
-        Command c(*pos_++);
-        if (c.type != type) {
-            LOGTHROW(err1, std::runtime_error)
-                << "Unexpected type: " << static_cast<int>(c.type)
-                << " (expected: " << static_cast<int>(type) << ").";
-        }
-        return c;
-    }
-
-    void shift(Cursor &cursor) {
-        if (pos_ == end_) {
-            LOGTHROW(err1, std::runtime_error)
-                << "Cannot read shift past the end of input.";
-        }
-        cursor.x += *pos_++;
-
-        if (pos_ == end_) {
-            LOGTHROW(err1, std::runtime_error)
-                << "Cannot read shift past the end of input.";
-        }
-        cursor.y += *pos_++;
-    }
+    Command command(Command::Type type);
+    void shift(Cursor &cursor);
 
 private:
     const MvtGeometry &source_;
@@ -193,8 +191,43 @@ private:
     decltype(source_.end()) end_;
 };
 
+inline Command GeometryReader::command(Command::Type type)
+{
+    if (pos_ == end_) {
+        LOGTHROW(err1, std::runtime_error)
+            << "Cannot read command past the end of input.";
+    }
+    Command c(*pos_++);
+    if (c.type != type) {
+        LOGTHROW(err1, std::runtime_error)
+            << "Unexpected type: " << c.type
+            << " (expected: " << type << ").";
+    }
+    return c;
+}
 
-GeometryReader::Command checkNonzero(const GeometryReader::Command &cmd)
+inline std::int32_t unzigzag(std::uint32_t value)
+{
+    return ((value >> 1) ^ (-(value & 1)));
+}
+
+inline void GeometryReader::shift(Cursor &cursor)
+{
+    auto c(cursor);
+    if (pos_ == end_) {
+        LOGTHROW(err1, std::runtime_error)
+            << "Cannot read shift past the end of input.";
+    }
+    cursor.x += unzigzag(*pos_++);
+
+    if (pos_ == end_) {
+        LOGTHROW(err1, std::runtime_error)
+            << "Cannot read shift past the end of input.";
+    }
+    cursor.y += unzigzag(*pos_++);
+}
+
+inline Command checkNonzero(const Command &cmd)
 {
     if (!cmd.count) {
         LOGTHROW(err1, std::runtime_error)
@@ -203,7 +236,7 @@ GeometryReader::Command checkNonzero(const GeometryReader::Command &cmd)
     return cmd;
 }
 
-GeometryReader::Command checkZero(const GeometryReader::Command &cmd)
+inline Command checkZero(const Command &cmd)
 {
     if (cmd.count) {
         LOGTHROW(err1, std::runtime_error)
@@ -212,7 +245,7 @@ GeometryReader::Command checkZero(const GeometryReader::Command &cmd)
     return cmd;
 }
 
-GeometryReader::Command checkSingle(const GeometryReader::Command &cmd)
+inline Command checkSingle(const Command &cmd)
 {
     if (cmd.count != 1) {
         LOGTHROW(err1, std::runtime_error)
@@ -227,7 +260,7 @@ std::unique_ptr< ::OGRGeometry> points(GeometryReader &gr)
 
     // moveTo+
     auto moveTo
-        (checkNonzero(gr.command(GeometryReader::Command::Type::moveTo)));
+        (checkNonzero(gr.command(Command::Type::moveTo)));
 
     if (moveTo.count == 1) {
         // single point
@@ -256,7 +289,7 @@ singleLineString(GeometryReader &gr, Cursor &cur, bool closed = false)
 
     // moveTo{1}
     auto moveTo
-        (checkSingle(gr.command(GeometryReader::Command::Type::moveTo)));
+        (checkSingle(gr.command(Command::Type::moveTo)));
 
     gr.shift(cur);
     ls->addPoint(gr.x(cur.x), gr.y(cur.y));
@@ -264,7 +297,7 @@ singleLineString(GeometryReader &gr, Cursor &cur, bool closed = false)
 
     // lineTo+
     auto lineTo
-        (checkNonzero(gr.command(GeometryReader::Command::Type::lineTo)));
+        (checkNonzero(gr.command(Command::Type::lineTo)));
 
     while (lineTo.count--) {
         gr.shift(cur);
@@ -275,7 +308,7 @@ singleLineString(GeometryReader &gr, Cursor &cur, bool closed = false)
 
     // expect closePath{1}
     auto closePath
-        (checkNonzero(gr.command(GeometryReader::Command::Type::closePath)));
+        (checkNonzero(gr.command(Command::Type::closePath)));
 
     // last segment
     ls->addPoint(gr.x(start.x), gr.y(start.y));

@@ -406,6 +406,84 @@ generateGeometry(const vector_tile::Tile_Feature &feature, const Trafo &trafo)
     return {};
 }
 
+struct GetValue {
+    GetValue(const vector_tile::Tile_Value &value) : value(value) {}
+    const vector_tile::Tile_Value &value;
+};
+
+std::ostream& operator<<(std::ostream &os, const GetValue &gv)
+{
+    if (gv.value.has_string_value()) { return os << gv.value.string_value(); }
+    if (gv.value.has_float_value()) { return os << gv.value.float_value(); }
+    if (gv.value.has_double_value()) { return os << gv.value.double_value(); }
+    if (gv.value.has_int_value()) { return os << gv.value.int_value(); }
+    if (gv.value.has_uint_value()) { return os << gv.value.uint_value(); }
+    if (gv.value.has_sint_value()) { return os << gv.value.sint_value(); }
+    if (gv.value.has_bool_value()) { return os << gv.value.bool_value(); }
+    return os;
+}
+
+::OGRFieldType ogrType(const vector_tile::Tile_Value &value)
+{
+    if (value.has_string_value()) { return ::OGRFieldType::OFTString; }
+    if (value.has_float_value()) { return ::OGRFieldType::OFTReal; }
+    if (value.has_double_value()) { return ::OGRFieldType::OFTReal; }
+    if (value.has_int_value()) { return ::OGRFieldType::OFTInteger; }
+    if (value.has_uint_value()) { return ::OGRFieldType::OFTInteger; }
+    if (value.has_sint_value()) { return ::OGRFieldType::OFTInteger; }
+    if (value.has_bool_value()) { return ::OGRFieldType::OFTInteger; }
+    return ::OGRFieldType::OFTString;
+}
+
+::OGRFieldSubType ogrSubType(const vector_tile::Tile_Value &value)
+{
+    if (value.has_float_value()) { return ::OGRFieldSubType::OFSTFloat32; }
+    if (value.has_bool_value()) { return ::OGRFieldSubType::OFSTBoolean; }
+    return ::OGRFieldSubType::OFSTNone;
+}
+
+void setField(::OGRFeature &feature, int i
+              , const vector_tile::Tile_Value &value)
+{
+    if (value.has_string_value()) {
+        feature.SetField(i, value.string_value().c_str());
+        return;
+    }
+
+    if (value.has_float_value()) {
+        feature.SetField(i, value.float_value());
+        return;
+    }
+
+    if (value.has_double_value()) {
+        feature.SetField(i, value.double_value());
+        return;
+    }
+
+    if (value.has_int_value()) {
+        feature.SetField(i, GIntBig(value.int_value()));
+        return;
+    }
+
+    if (value.has_uint_value()) {
+        feature.SetField(i, GIntBig(value.uint_value()));
+        return;
+    }
+
+    if (value.has_sint_value()) {
+        feature.SetField(i, GIntBig(value.sint_value()));
+        return;
+    }
+
+    if (value.has_bool_value()) {
+        feature.SetField(i, int(value.bool_value()));
+        return;
+    }
+
+    // unknown
+    feature.SetField(i, "");
+}
+
 } // namespace
 
 ::OGRFeature* MvtDataset::Layer::GetNextFeature()
@@ -425,8 +503,48 @@ generateGeometry(const vector_tile::Tile_Feature &feature, const Trafo &trafo)
     auto *defn(new ::OGRFeatureDefn());
     defn->SetGeomType(type(feature.type()));
 
+    // get tag count and make even if odd
+    auto tagCount(feature.tags_size());
+    if (tagCount & 0x1) { --tagCount; }
+
+    // prepare field definitions
+    for (decltype(tagCount) i(0); i < tagCount; i += 2) {
+        // get and validate key and value endices
+        const auto keyIndex(feature.tags(i));
+        const auto valueIndex(feature.tags(i + 1));
+
+        if ((keyIndex >= std::size_t(layer_.keys_size()))
+            || (valueIndex >= std::size_t(layer_.values_size()))) {
+            // key or value index out of bounds, ignore this attribute
+            continue;
+        }
+
+        const auto &value(layer_.values(valueIndex));
+        // build field definition
+        ::OGRFieldDefn def(layer_.keys(keyIndex).c_str(), ogrType(value));
+        def.SetSubType(ogrSubType(value));
+        defn->AddFieldDefn(&def);
+    }
+
     // create feature
     std::unique_ptr< ::OGRFeature> of(new ::OGRFeature(defn));
+
+    // fill in fields
+    int fid(0);
+    for (decltype(tagCount) i(0); i < tagCount; i += 2, ++fid) {
+        // get and validate key and value endices
+        const auto keyIndex(feature.tags(i));
+        const auto valueIndex(feature.tags(i + 1));
+
+        if ((keyIndex >= std::size_t(layer_.keys_size()))
+            || (valueIndex >= std::size_t(layer_.values_size()))) {
+            // key or value index out of bounds, ignore this attribute
+            continue;
+        }
+
+        const auto &value(layer_.values(valueIndex));
+        setField(*of, fid, value);
+    }
 
     // set ID
     if (feature.has_id()) { of->SetFID(feature.id()); }
@@ -446,23 +564,6 @@ generateGeometry(const vector_tile::Tile_Feature &feature, const Trafo &trafo)
     // next
     ++ifeatures_;
     return of.release();
-}
-
-struct GetValue {
-    GetValue(const vector_tile::Tile_Value &value) : value(value) {}
-    const vector_tile::Tile_Value &value;
-};
-
-std::ostream& operator<<(std::ostream &os, const GetValue &gv)
-{
-    if (gv.value.has_string_value()) { return os << gv.value.string_value(); }
-    if (gv.value.has_float_value()) { return os << gv.value.float_value(); }
-    if (gv.value.has_double_value()) { return os << gv.value.double_value(); }
-    if (gv.value.has_int_value()) { return os << gv.value.int_value(); }
-    if (gv.value.has_uint_value()) { return os << gv.value.uint_value(); }
-    if (gv.value.has_sint_value()) { return os << gv.value.sint_value(); }
-    if (gv.value.has_bool_value()) { return os << gv.value.bool_value(); }
-    return os;
 }
 
 MvtDataset::MvtDataset(std::unique_ptr<vector_tile::Tile> tile

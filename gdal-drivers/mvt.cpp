@@ -10,8 +10,10 @@
 #include <iomanip>
 
 #include <boost/lexical_cast.hpp>
+#include <boost/algorithm/string/predicate.hpp>
 
 #include <ogrsf_frmts.h>
+#include <cpl_http.h>
 
 #include "dbglog/dbglog.hpp"
 
@@ -24,6 +26,7 @@
 #include "./mvt.hpp"
 
 namespace po = boost::program_options;
+namespace ba = boost::algorithm;
 
 namespace gdal_drivers {
 
@@ -47,11 +50,11 @@ public:
         }
     }
 
-    inline double x(std::uint32_t value) const {
+    inline double x(std::int32_t value) const {
         return value * scale_.width + shift_(0);
     }
 
-    inline double y(std::uint32_t value) const {
+    inline double y(std::int32_t value) const {
         return value * scale_.height + shift_(1);
     }
 
@@ -435,7 +438,7 @@ generateGeometry(const vector_tile::Tile_Feature &feature, const Trafo &trafo)
         of->SetGeometryDirectly(geometry.release());
     } catch (const std::exception &e) {
         CPLError(CE_Failure, CPLE_AssertionFailed
-                 , "Error processing feature's geometry: <%s>.\n"
+                 , "Error processing feature's geometry: <%s>."
                  , e.what());
         return nullptr;
     }
@@ -495,6 +498,52 @@ OGRLayer* MvtDataset::GetLayerByName(const char *name)
     return nullptr;
 }
 
+bool isRemoteMvt(::GDALOpenInfo *openInfo)
+{
+    // protocol prefix and .mvt -> could be mvt
+    if ((ba::istarts_with(openInfo->pszFilename, "http:")
+         || ba::istarts_with(openInfo->pszFilename, "https:")
+         || ba::istarts_with(openInfo->pszFilename, "ftp:"))
+        && ba::icontains(openInfo->pszFilename, ".mvt"))
+    {
+        return true;
+    }
+    return false;
+}
+
+int MvtDataset::Identify(::GDALOpenInfo *openInfo)
+{
+    if (isRemoteMvt(openInfo)) { return true; }
+
+    // TODO: try to decode
+
+    // let the rest of machinery decode
+    return true;
+}
+
+bool loadFromRemote(vector_tile::Tile &tile, const char *path)
+{
+    struct Result {
+        Result(::CPLHTTPResult *res) : res(res) {}
+        ~Result() { if (res) { ::CPLHTTPDestroyResult(res); } }
+        ::CPLHTTPResult *res;
+    } res(::CPLHTTPFetch(path, nullptr));
+
+    if (!res.res || !res.res->nDataLen || !::CPLGetLastErrorNo()) {
+        return false;
+    }
+
+    if (res.res->nStatus) {
+        CPLError(CE_Failure, CPLE_AppDefined,
+                 "Curl reports error: %d: %s",
+                 res.res->nStatus, res.res->pszErrBuf);
+        return false;
+    }
+
+    // try to parse
+    return tile.ParseFromArray(res.res->pabyData, res.res->nDataLen);
+}
+
 GDALDataset* MvtDataset::Open(::GDALOpenInfo *openInfo)
 {
     ::CPLErrorReset();
@@ -506,10 +555,16 @@ GDALDataset* MvtDataset::Open(::GDALOpenInfo *openInfo)
     std::unique_ptr<vector_tile::Tile> tile(new vector_tile::Tile());
 
     try {
-        std::ifstream f(openInfo->pszFilename
-                        , std::ios::in | std::ios::binary);
-        if (!tile->ParseFromIstream(&f)) {
-            return nullptr;
+        if (isRemoteMvt(openInfo)) {
+            if (!loadFromRemote(*tile, openInfo->pszFilename)) {
+                return nullptr;
+            }
+        } else {
+            std::ifstream f(openInfo->pszFilename
+                            , std::ios::in | std::ios::binary);
+            if (!tile->ParseFromIstream(&f)) {
+                return nullptr;
+            }
         }
     } catch (...) {
         return nullptr;
@@ -517,7 +572,7 @@ GDALDataset* MvtDataset::Open(::GDALOpenInfo *openInfo)
 
     if (openInfo->eAccess == GA_Update) {
         CPLError(CE_Warning, CPLE_NotSupported,
-                 "MVT driver allows only read-only access.\n");
+                 "MVT driver allows only read-only access.");
     }
 
     boost::optional<geo::SrsDefinition> srs;
@@ -530,7 +585,7 @@ GDALDataset* MvtDataset::Open(::GDALOpenInfo *openInfo)
         } catch (const std::exception &e) {
             CPLError(CE_Failure, CPLE_IllegalArg
                      , "MVT Dataset initialization failure: "
-                     "failed to parse provided open options MVT_SRS (%s).\n"
+                     "failed to parse provided open options MVT_SRS (%s)."
                      , e.what());
             return nullptr;
         }
@@ -545,7 +600,7 @@ GDALDataset* MvtDataset::Open(::GDALOpenInfo *openInfo)
         } catch (std::exception) {
             CPLError(CE_Failure, CPLE_IllegalArg
                      , "MVT Dataset initialization failure: "
-                     "failed to parse provided open options MVT_EXTENTS.\n");
+                     "failed to parse provided open options MVT_EXTENTS.");
             return nullptr;
         }
     }
@@ -560,18 +615,18 @@ GDALDataset* MvtDataset::Open(::GDALOpenInfo *openInfo)
 
 void GDALRegister_MvtDataset()
 {
-    if (GDALGetDriverByName("MVT")) { return; }
+    if (::GDALGetDriverByName("MVT")) { return; }
 
     std::unique_ptr< ::GDALDriver> driver(new ::GDALDriver());
 
     driver->SetDescription("MVT");
     driver->SetMetadataItem(GDAL_DCAP_VECTOR, "YES");
     driver->SetMetadataItem
-        (GDAL_DMD_LONGNAME, "Mapbox Vector TIles.");
+        (GDAL_DMD_LONGNAME, "Mapbox Vector Tiles.");
     driver->SetMetadataItem(GDAL_DMD_EXTENSION, "");
 
     driver->pfnOpen = gdal_drivers::MvtDataset::Open;
-    driver->SetMetadataItem(GDAL_DCAP_VIRTUALIO, "YES");
+    driver->pfnIdentify = gdal_drivers::MvtDataset::Identify;
 
     ::GetGDALDriverManager()->RegisterDriver(driver.release());
 }

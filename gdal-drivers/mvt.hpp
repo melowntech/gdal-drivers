@@ -31,6 +31,7 @@ namespace gdal_drivers {
 class MvtDataset : public GDALDataset {
 public:
     static ::GDALDataset* Open(::GDALOpenInfo *openInfo);
+    static int Identify(::GDALOpenInfo *openInfo);
 
     class Layer;
     friend class Layer;

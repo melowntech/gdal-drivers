@@ -273,7 +273,7 @@ std::unique_ptr< ::OGRGeometry> points(GeometryReader &gr)
     }
 
     // multi point
-    std::unique_ptr< ::OGRGeometryCollection> g(new ::OGRGeometryCollection());
+    std::unique_ptr< ::OGRMultiPoint> g(new ::OGRMultiPoint());
 
     // process all points
     while (moveTo.count--) {

@@ -632,7 +632,7 @@ bool loadFromRemote(vector_tile::Tile &tile, const char *path)
         ::CPLHTTPResult *res;
     } res(::CPLHTTPFetch(path, nullptr));
 
-    if (!res.res || !res.res->nDataLen || !::CPLGetLastErrorNo()) {
+    if (!res.res || !res.res->nDataLen || ::CPLGetLastErrorNo()) {
         return false;
     }
 

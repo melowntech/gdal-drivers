@@ -626,6 +626,7 @@ int MvtDataset::Identify(::GDALOpenInfo *openInfo)
 
 bool loadFromRemote(vector_tile::Tile &tile, const char *path)
 {
+    ::CPLErrorReset();
     struct Result {
         Result(::CPLHTTPResult *res) : res(res) {}
         ~Result() { if (res) { ::CPLHTTPDestroyResult(res); } }

@@ -604,10 +604,12 @@ bool isRemoteMvt(::GDALOpenInfo *openInfo)
     // protocol prefix and .mvt -> could be mvt
     if ((ba::istarts_with(openInfo->pszFilename, "http:")
          || ba::istarts_with(openInfo->pszFilename, "https:")
-         || ba::istarts_with(openInfo->pszFilename, "ftp:"))
-        && ba::icontains(openInfo->pszFilename, ".mvt"))
+         || ba::istarts_with(openInfo->pszFilename, "ftp:")))
     {
-        return true;
+        if (ba::icontains(openInfo->pszFilename, ".mvt")) { return true; }
+        if (ba::icontains(openInfo->pszFilename, ".vector.pbf")) {
+            return true;
+        }
     }
     return false;
 }

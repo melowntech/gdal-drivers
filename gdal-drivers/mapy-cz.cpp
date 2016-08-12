@@ -69,13 +69,16 @@ boost::optional<T> getOptionalEnv(const char *var)
 GDALDataset* MapyczDataset::Open(GDALOpenInfo *openInfo)
 {
     // parse path
-    auto uri(utility::parseUri(openInfo->pszFilename));
+    utility::Uri uri;
+    try {
+        uri = utility::Uri(openInfo->pszFilename);
+    } catch (...) { return nullptr; }
 
     // check schema
-    if (uri.schema != def::Schema) { return nullptr; }
+    if (uri.scheme() != def::Schema) { return nullptr; }
 
     // get map type (from uri host, with fallback to default map type
-    auto mapType(uri.host);
+    auto mapType(uri.host());
 
     if (ba::ends_with(mapType, "-m")) {
         // mercator -> let the Webmercator module handle this
@@ -85,9 +88,9 @@ GDALDataset* MapyczDataset::Open(GDALOpenInfo *openInfo)
     // parse zoom
     int zoom;
     try {
-        auto zc(utility::pathComponent(uri.path, 1));
-        if (!zc) { return nullptr; }
-        zoom  = boost::lexical_cast<int>(zc->string());
+        auto zc(uri.pathComponent(0));
+        if (zc.empty()) { return nullptr; }
+        zoom  = boost::lexical_cast<int>(zc);
     } catch (const boost::bad_lexical_cast&) {
         return nullptr;
     }
@@ -96,7 +99,7 @@ GDALDataset* MapyczDataset::Open(GDALOpenInfo *openInfo)
     // modifiers
     unsigned int flags(Flag::none);
     unsigned int index(0);
-    for (const auto &c : fs::path(uri.path)) {
+    for (const auto &c : uri.path()) {
         // skip root and zoom
         if (index++ < 2) { continue; }
 

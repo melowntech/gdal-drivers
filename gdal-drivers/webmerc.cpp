@@ -210,19 +210,25 @@ boost::optional<T> getOptionalEnv(const char *var)
 GDALDataset* WebMercatorDataset::Open(GDALOpenInfo *openInfo)
 {
     // parse path
-    auto uri(utility::parseUri(openInfo->pszFilename));
+    utility::Uri uri;
+    try {
+        uri = utility::Uri(openInfo->pszFilename);
+    } catch (...) { return nullptr; }
+
+    std::string path(uri.path().string());
+    std::string host(uri.host());
 
     try {
-        boost::lexical_cast<int>(uri.host);
+        boost::lexical_cast<int>(uri.host());
         // host is number -> update uri
-        uri.path = "/" + uri.host + uri.path;
-        uri.host = "";
+        path = "/" + host + path;
+        host = "";
     } catch (boost::bad_lexical_cast) {}
 
     auto fSupportedSources
-        (def::SupportedSources.find((uri.schema + "/" + uri.host)));
+        (def::SupportedSources.find((uri.scheme() + "/" + host)));
     if (fSupportedSources == def::SupportedSources.end()) {
-        // schema/host combination not found
+        // scheme/host combination not found
         return nullptr;
     }
 
@@ -240,7 +246,7 @@ GDALDataset* WebMercatorDataset::Open(GDALOpenInfo *openInfo)
     // parse zoom
     int zoom;
     try {
-        auto zc(utility::pathComponent(uri.path, 1));
+        auto zc(utility::pathComponent(path, 1));
         if (!zc) { return nullptr; }
         zoom  = boost::lexical_cast<int>(zc->string());
     } catch (const boost::bad_lexical_cast&) {
@@ -251,7 +257,7 @@ GDALDataset* WebMercatorDataset::Open(GDALOpenInfo *openInfo)
     // modifiers
     unsigned int flags(Flag::none);
     unsigned int index(0);
-    for (const auto &c : fs::path(uri.path)) {
+    for (const auto &c : fs::path(path)) {
         // skip root and zoom
         if (index++ < 2) { continue; }
 

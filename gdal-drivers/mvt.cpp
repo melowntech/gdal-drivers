@@ -428,9 +428,9 @@ std::ostream& operator<<(std::ostream &os, const GetValue &gv)
     if (value.has_string_value()) { return ::OGRFieldType::OFTString; }
     if (value.has_float_value()) { return ::OGRFieldType::OFTReal; }
     if (value.has_double_value()) { return ::OGRFieldType::OFTReal; }
-    if (value.has_int_value()) { return ::OGRFieldType::OFTInteger; }
-    if (value.has_uint_value()) { return ::OGRFieldType::OFTInteger; }
-    if (value.has_sint_value()) { return ::OGRFieldType::OFTInteger; }
+    if (value.has_int_value()) { return ::OGRFieldType::OFTInteger64; }
+    if (value.has_uint_value()) { return ::OGRFieldType::OFTInteger64; }
+    if (value.has_sint_value()) { return ::OGRFieldType::OFTInteger64; }
     if (value.has_bool_value()) { return ::OGRFieldType::OFTInteger; }
     return ::OGRFieldType::OFTString;
 }

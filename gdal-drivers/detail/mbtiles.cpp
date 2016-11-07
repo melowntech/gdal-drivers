@@ -69,7 +69,8 @@ inline const char* parsePart(const char *p, T &value)
     return parsePartImpl<minWidth, positive>(p, value);
 }
 
-bool parse(const char *p, int &zoom, int &col, int &row)
+bool parse(const char *p, unsigned int &zoom, unsigned int &col
+           , unsigned int &row)
 {
     if (!(p = parsePart<1>(p, zoom))) { return false; }
     if (*p++ != '-') { return false; }
@@ -108,12 +109,23 @@ bool loadFromMbTilesArchive(vector_tile::Tile &tile, const char *path)
     }
 
     // try to parse zoom-row-col
-    int zoom(0), col(0), row(0);
+    unsigned int zoom(0), col(0), row(0);
     if (!parse(p + 1, zoom, col, row)) {
         ::CPLError(CE_Failure, CPLE_AppDefined
                    , "Unable to match zoom-col-row in the last element"
                    " of <%s>.", path);
     }
+
+    unsigned int max((1 << zoom) - 1);
+
+    if ((col > max) || (row > max)) {
+        ::CPLError(CE_Failure, CPLE_AppDefined
+                   , "Values in zoom-col-row in the last element"
+                   " of <%s> are out-of-bound (0-%d).", path, max);
+    }
+
+    // switch row from bottom to top
+    row = max - row;
 
     const std::string mbtiles(path, p);
 

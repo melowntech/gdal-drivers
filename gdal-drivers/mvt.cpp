@@ -443,7 +443,8 @@ std::ostream& operator<<(std::ostream &os, const GetValue &gv)
 }
 
 void setField(::OGRFeature &feature, int i
-              , const vector_tile::Tile_Value &value)
+              , const vector_tile::Tile_Value &value
+              , bool fid)
 {
     if (value.has_string_value()) {
         feature.SetField(i, value.string_value().c_str());
@@ -462,16 +463,19 @@ void setField(::OGRFeature &feature, int i
 
     if (value.has_int_value()) {
         feature.SetField(i, GIntBig(value.int_value()));
+        if (fid) { feature.SetFID(GIntBig(value.int_value())); }
         return;
     }
 
     if (value.has_uint_value()) {
         feature.SetField(i, GIntBig(value.uint_value()));
+        if (fid) { feature.SetFID(GIntBig(value.int_value())); }
         return;
     }
 
     if (value.has_sint_value()) {
         feature.SetField(i, GIntBig(value.sint_value()));
+        if (fid) { feature.SetFID(GIntBig(value.int_value())); }
         return;
     }
 
@@ -503,51 +507,67 @@ void setField(::OGRFeature &feature, int i
     auto *defn(new ::OGRFeatureDefn());
     defn->SetGeomType(type(feature.type()));
 
-    // get tag count and make even if odd
-    auto tagCount(feature.tags_size());
-    if (tagCount & 0x1) { --tagCount; }
+    std::unique_ptr< ::OGRFeature> of;
 
-    // prepare field definitions
-    for (decltype(tagCount) i(0); i < tagCount; i += 2) {
-        // get and validate key and value endices
-        const auto keyIndex(feature.tags(i));
-        const auto valueIndex(feature.tags(i + 1));
+    if (!ds_.noFields_) {
+        // get tag count and make even if odd
+        auto tagCount(feature.tags_size());
+        if (tagCount & 0x1) { --tagCount; }
 
-        if ((keyIndex >= std::size_t(layer_.keys_size()))
-            || (valueIndex >= std::size_t(layer_.values_size()))) {
-            // key or value index out of bounds, ignore this attribute
-            continue;
+        int idField(-1);
+
+        // prepare field definitions
+        for (decltype(tagCount) i(0); i < tagCount; i += 2) {
+            // get and validate key and value endices
+            const auto keyIndex(feature.tags(i));
+            const auto valueIndex(feature.tags(i + 1));
+
+            if ((keyIndex >= std::size_t(layer_.keys_size()))
+                || (valueIndex >= std::size_t(layer_.values_size()))) {
+                // key or value index out of bounds, ignore this attribute
+                continue;
+            }
+
+            const auto &value(layer_.values(valueIndex));
+            // build field definition
+            auto name(layer_.keys(keyIndex));
+            ::OGRFieldDefn def(name.c_str(), ogrType(value));
+            def.SetSubType(ogrSubType(value));
+            defn->AddFieldDefn(&def);
+
+            // "id" -> remember field id
+            if (name == "id") { idField = i / 2; }
         }
 
-        const auto &value(layer_.values(valueIndex));
-        // build field definition
-        ::OGRFieldDefn def(layer_.keys(keyIndex).c_str(), ogrType(value));
-        def.SetSubType(ogrSubType(value));
-        defn->AddFieldDefn(&def);
-    }
+        // create feature
+        of = std::unique_ptr< ::OGRFeature>(new ::OGRFeature(defn));
 
-    // create feature
-    std::unique_ptr< ::OGRFeature> of(new ::OGRFeature(defn));
-
-    // fill in fields
-    int fid(0);
-    for (decltype(tagCount) i(0); i < tagCount; i += 2, ++fid) {
-        // get and validate key and value endices
-        const auto keyIndex(feature.tags(i));
-        const auto valueIndex(feature.tags(i + 1));
-
-        if ((keyIndex >= std::size_t(layer_.keys_size()))
-            || (valueIndex >= std::size_t(layer_.values_size()))) {
-            // key or value index out of bounds, ignore this attribute
-            continue;
+        // feature has id -> use it as id
+        if (feature.has_id()) {
+            // we have feature id, use it and unsed "id" field index
+            of->SetFID(feature.id());
+            idField = -1;
         }
 
-        const auto &value(layer_.values(valueIndex));
-        setField(*of, fid, value);
-    }
+        // fill in fields
+        int fid(0);
+        for (decltype(tagCount) i(0); i < tagCount; i += 2, ++fid) {
+            // get and validate key and value endices
+            const auto keyIndex(feature.tags(i));
+            const auto valueIndex(feature.tags(i + 1));
 
-    // set ID
-    if (feature.has_id()) { of->SetFID(feature.id()); }
+            if ((keyIndex >= std::size_t(layer_.keys_size()))
+                || (valueIndex >= std::size_t(layer_.values_size()))) {
+                // key or value index out of bounds, ignore this attribute
+                continue;
+            }
+
+            const auto &value(layer_.values(valueIndex));
+            setField(*of, fid, value, (fid == idField));
+        }
+    } else {
+        of = std::unique_ptr< ::OGRFeature>(new ::OGRFeature(defn));
+    }
 
     try {
         // set geometry
@@ -568,9 +588,10 @@ void setField(::OGRFeature &feature, int i
 
 MvtDataset::MvtDataset(std::unique_ptr<vector_tile::Tile> tile
                        , const boost::optional<geo::SrsDefinition> &srs
-                       , const boost::optional<math::Extents2> &extents)
+                       , const boost::optional<math::Extents2> &extents
+                       , bool noFields)
     : tile_(std::move(tile)), srs_(srs), extents_(extents)
-    , layers_(tile_->layers_size())
+    , noFields_(noFields), layers_(tile_->layers_size())
 {}
 
 OGRLayer* MvtDataset::GetLayer(int l)
@@ -709,8 +730,11 @@ GDALDataset* MvtDataset::Open(::GDALOpenInfo *openInfo)
         }
     }
 
+    bool noFields
+        (::CSLFetchBoolean(openInfo->papszOpenOptions, "MVT_NOFIELDS", false));
+
     // parsed tile, pass it to dataset
-    return new MvtDataset(std::move(tile), srs, extents);
+    return new MvtDataset(std::move(tile), srs, extents, noFields);
 }
 
 } // namespace gdal_drivers

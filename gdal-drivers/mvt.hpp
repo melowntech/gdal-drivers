@@ -44,11 +44,13 @@ public:
 private:
     MvtDataset(std::unique_ptr<vector_tile::Tile> tile
                , const boost::optional<geo::SrsDefinition> &srs
-               , const boost::optional<math::Extents2> &extents);
+               , const boost::optional<math::Extents2> &extents
+               , bool noFields);
 
     std::unique_ptr<vector_tile::Tile> tile_;
     boost::optional<geo::SrsDefinition> srs_;
     boost::optional<math::Extents2> extents_;
+    bool noFields_;
     std::vector<std::unique_ptr<Layer>> layers_;
 };
 

@@ -1,6 +1,4 @@
-define_module(LIBRARY gdal-drivers DEPENDS
-  geo jsoncpp CURL PROTOBUF
-  Boost_PROGRAM_OPTIONS)
+set(gdal-drivers_DEPENDS)
 
 set(gdal-drivers_SOURCES
   register.hpp register.cpp
@@ -16,7 +14,27 @@ set(gdal-drivers_SOURCES
 
   detail/fetcher.hpp detail/fetcher.cpp
   detail/localcache.hpp detail/localcache.cpp
-)
+  detail/mbtiles.hpp
+  )
+
+if(Sqlite3_FOUND)
+  message(STATUS "gdal-drivers: compiling in Sqlite3 support")
+  list(APPEND gdal-drivers_SOURCES
+    detail/mbtiles.cpp)
+
+  list(APPEND gdal-drivers_DEPENDS Sqlite3 Boost_IOSTREAMS)
+else()
+  message(STATUS "gdal-drivers: compiling without Sqlite3 support")
+  list(APPEND gdal-drivers_SOURCES
+    detail/mbtiles.nosqlite.cpp)
+endif()
+
+define_module(LIBRARY gdal-drivers
+  DEPENDS
+  ${gdal-drivers_DEPENDS}
+  geo jsoncpp CURL PROTOBUF
+  Boost_PROGRAM_OPTIONS
+  )
 
 protobuf_generate_cpp(gdal-drivers_PROTO_SOURCES gdal-drivers_PROTO_HDRS
   proto/vector_tile.proto)

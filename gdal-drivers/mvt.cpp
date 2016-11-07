@@ -25,6 +25,9 @@
 
 #include "./mvt.hpp"
 
+#include "./mvt.hpp"
+#include "./detail/mbtiles.hpp"
+
 namespace po = boost::program_options;
 namespace ba = boost::algorithm;
 
@@ -635,9 +638,16 @@ bool isRemoteMvt(::GDALOpenInfo *openInfo)
     return false;
 }
 
+bool isMbTilesArchive(::GDALOpenInfo *openInfo)
+{
+    return ba::icontains(openInfo->pszFilename, ".mbtiles/");
+}
+
 int MvtDataset::Identify(::GDALOpenInfo *openInfo)
 {
     if (isRemoteMvt(openInfo)) { return true; }
+
+    if (isMbTilesArchive(openInfo)) { return true; }
 
     // TODO: try to decode
 
@@ -682,6 +692,12 @@ GDALDataset* MvtDataset::Open(::GDALOpenInfo *openInfo)
     try {
         if (isRemoteMvt(openInfo)) {
             if (!loadFromRemote(*tile, openInfo->pszFilename)) {
+                return nullptr;
+            }
+        } else if (isMbTilesArchive(openInfo)) {
+            if (!detail::loadFromMbTilesArchive
+                (*tile, openInfo->pszFilename))
+            {
                 return nullptr;
             }
         } else {

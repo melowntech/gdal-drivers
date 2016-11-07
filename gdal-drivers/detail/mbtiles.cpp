@@ -19,9 +19,10 @@ namespace gdal_drivers { namespace detail {
 namespace {
 
 struct Database {
-    Database() : db() {}
+    Database(const std::string path) : path(path), db() {}
     ~Database() { if (db) { ::sqlite3_close(db); } }
     operator ::sqlite3*() { return db; }
+    const std::string path;
     ::sqlite3 *db;
 };
 
@@ -84,11 +85,12 @@ bool check(int status, Database &db, const char *what)
 {
     if (!status) { return false; }
     const char *msg(::sqlite3_errmsg(db));
-    LOG(err2) << "Sqlite3 operation " << what << " failed: <"
-              << msg << ">.";
+    LOG(err1) << "Sqlite3 operation " << what << " failed: <"
+              << msg << "> (file \"" << db.path << "\").";
 
     ::CPLError(CE_Failure, CPLE_AppDefined
-               , "Sqlite3 operation %s failed: <%s>.", what, msg);
+               , "Sqlite3 operation %s failed: <%s> (file \"%s\"."
+               , what, msg, db.path.c_str());
 
     return true;
 }
@@ -113,12 +115,10 @@ bool loadFromMbTilesArchive(vector_tile::Tile &tile, const char *path)
                    " of <%s>.", path);
     }
 
-    LOG(info4) << "zoom: " << zoom << ", col: " << col << ", row: " << row;
-
     const std::string mbtiles(path, p);
 
     // open database
-    Database db;
+    Database db(mbtiles);
     if (check(::sqlite3_open_v2(mbtiles.c_str(), &db.db, SQLITE_OPEN_READONLY
                                 , nullptr)
               , db, "sqlite3_open_v2"))  { return false; }

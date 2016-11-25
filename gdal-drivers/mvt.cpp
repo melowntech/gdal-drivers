@@ -668,7 +668,16 @@ bool loadFromRemote(vector_tile::Tile &tile, const char *path)
         return false;
     }
 
-    if (res.res->nStatus) {
+    switch (res.res->nStatus) {
+    case 0: break;
+
+    case 404:
+        CPLError(CE_Failure, CPLE_OpenFailed,
+                 "Curl reports error: %d: %s",
+                 res.res->nStatus, res.res->pszErrBuf);
+        return false;
+
+    default:
         CPLError(CE_Failure, CPLE_AppDefined,
                  "Curl reports error: %d: %s",
                  res.res->nStatus, res.res->pszErrBuf);

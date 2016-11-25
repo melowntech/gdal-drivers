@@ -159,7 +159,7 @@ bool loadFromMbTilesArchive(vector_tile::Tile &tile, const char *path)
     case SQLITE_ROW: break;
 
     case SQLITE_DONE:
-        ::CPLError(CE_Failure, CPLE_AppDefined
+        ::CPLError(CE_Failure, CPLE_OpenFailed
                    , "No tile %d-%d-%d found in database file <%s>."
                    , zoom, col, row, mbtiles.c_str());
         return false;

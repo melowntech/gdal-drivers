@@ -1,3 +1,6 @@
+# bump version here
+set(gdal-drivers_VERSION 1.12)
+
 set(gdal-drivers_DEPENDS)
 
 set(gdal-drivers_SOURCES
@@ -29,10 +32,11 @@ else()
     detail/mbtiles.nosqlite.cpp)
 endif()
 
-define_module(LIBRARY gdal-drivers
+define_module(LIBRARY gdal-drivers=${gdal-drivers_VERSION}
   DEPENDS
   ${gdal-drivers_DEPENDS}
-  geo jsoncpp CURL PROTOBUF
+  geo>=1.24 jsoncpp>=1.1
+  CURL PROTOBUF
   Boost_PROGRAM_OPTIONS
   )
 

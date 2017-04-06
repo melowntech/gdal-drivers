@@ -1,5 +1,5 @@
 # bump version here
-set(gdal-drivers_VERSION 1.12)
+set(gdal-drivers_VERSION 1.13)
 
 set(gdal-drivers_DEPENDS)
 
@@ -35,7 +35,7 @@ endif()
 define_module(LIBRARY gdal-drivers=${gdal-drivers_VERSION}
   DEPENDS
   ${gdal-drivers_DEPENDS}
-  geo>=1.24 jsoncpp>=1.1
+  geo>=1.24 jsoncpp>=2.0
   CURL PROTOBUF
   Boost_PROGRAM_OPTIONS
   )

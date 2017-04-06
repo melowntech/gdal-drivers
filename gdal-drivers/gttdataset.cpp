@@ -251,7 +251,7 @@ GDALDataset * GttDataset::Open( GDALOpenInfo * openInfo ) {
 
             CPLError( CE_Failure, CPLE_IllegalArg,
                       "Failed to parse GTT configuration file (%s).\n",
-                      reader.getFormatedErrorMessages().c_str() );
+                      reader.getFormattedErrorMessages().c_str() );
             return 0x0;
         }
 

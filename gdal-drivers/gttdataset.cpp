@@ -269,18 +269,13 @@ GDALDataset * GttDataset::Open( GDALOpenInfo * openInfo ) {
 
     // read configuration file
     try {
-
-        Json::Reader reader;
-
-        if ( ! reader.parse( f, config ) ) {
-
-            CPLError( CE_Failure, CPLE_IllegalArg,
-                      "Failed to parse GTT configuration file (%s).\n",
-                      reader.getFormattedErrorMessages().c_str() );
-            return 0x0;
-        }
-
+        config = Json::read<std::string>(in, f, "GTT configuration");
         f.close();
+    } catch (const std::string &err) {
+        CPLError( CE_Failure, CPLE_IllegalArg,
+                  "Failed to parse GTT configuration file (%s).\n"
+                  , err.c_str() );
+        return 0x0;
 
     } catch ( std::exception & ) {
 

@@ -38,6 +38,8 @@
 #include "dbglog/dbglog.hpp"
 #include "geo/geodataset.hpp"
 
+#include "jsoncpp/io.hpp"
+
 #include "./gttdataset.hpp"
 
 
@@ -269,7 +271,7 @@ GDALDataset * GttDataset::Open( GDALOpenInfo * openInfo ) {
 
     // read configuration file
     try {
-        config = Json::read<std::string>(in, f, "GTT configuration");
+        config = Json::read<std::string>(f, path, "GTT configuration");
         f.close();
     } catch (const std::string &err) {
         CPLError( CE_Failure, CPLE_IllegalArg,

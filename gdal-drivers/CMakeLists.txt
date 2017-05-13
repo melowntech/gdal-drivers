@@ -43,6 +43,15 @@ define_module(LIBRARY gdal-drivers=${gdal-drivers_VERSION}
 protobuf_generate_cpp(gdal-drivers_PROTO_SOURCES gdal-drivers_PROTO_HDRS
   proto/vector_tile.proto)
 
+# protobuf generator generates that triggers warning in recent gcc -> no
+# warnings
+if(${CMAKE_CXX_COMPILER_ID} MATCHES GNU)
+  foreach(source ${gdal-drivers_PROTO_SOURCES})
+    set_source_files_properties(${source} PROPERTIES
+      COMPILE_FLAGS "-w")
+  endforeach()
+endif()
+
 add_library(gdal-drivers
   STATIC ${gdal-drivers_SOURCES}
   ${gdal-drivers_PROTO_SOURCES})

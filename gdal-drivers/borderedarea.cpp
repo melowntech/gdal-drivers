@@ -71,7 +71,11 @@ GDALDataset* BorderedAreaDataset::Open(GDALOpenInfo *openInfo)
     ::CPLErrorReset();
     const auto path(getPath(openInfo->pszFilename));
 
-    if (!exists(path / def::MaskPath)) { return nullptr; }
+    // Skip if mask path does not exist or the check fails
+    // (e.g.) insufficient privileges
+    boost::system::error_code ec;
+    if (!exists(path / def::MaskPath, ec)) { return nullptr; }
+    if (ec) { return nullptr; }
 
     // no updates
     if (openInfo->eAccess == GA_Update) {

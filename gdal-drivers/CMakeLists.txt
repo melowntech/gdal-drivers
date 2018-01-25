@@ -51,6 +51,12 @@ buildsys_library(gdal-drivers)
 target_link_libraries(gdal-drivers ${MODULE_LIBRARIES})
 buildsys_target_compile_definitions(gdal-drivers ${MODULE_DEFINITIONS})
 
+foreach (source ${gdal-drivers_PROTO_SOURCES})
+  # disable warnings in protobuf-generated code
+  set_source_files_properties(${source} PROPERTIES
+    COMPILE_FLAGS -w)
+endforeach()
+
 if(MODULE_service_FOUND)
   add_subdirectory(tools EXCLUDE_FROM_ALL)
 endif()

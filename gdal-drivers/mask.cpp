@@ -43,6 +43,7 @@
 #include "utility/streams.hpp"
 #include "utility/binaryio.hpp"
 #include "imgproc/rastermask/quadtree.hpp"
+#include "imgproc/fillrect.hpp"
 
 #include "./mask.hpp"
 
@@ -247,12 +248,9 @@ CPLErr MaskDataset::RasterBand::IReadBlock(int blockCol, int blockRow
             node.x -= xShift;
             node.y -= yShift;
 
-            // construct rectangle and intersect it with bounds
-            cv::Rect r(node.x, node.y, node.size, node.size);
-            auto rr(r & tileBounds_);
-            cv::rectangle(tile, rr
-                          , (value ? color::white : color::gray)
-                          , CV_FILLED, 4);
+            imgproc::fillRectangle
+                (tile, cv::Rect(node.x, node.y, node.size, node.size)
+                 , (value ? color::white : color::gray));
         });
 
         dset.mask_.forEachQuad(draw, con);

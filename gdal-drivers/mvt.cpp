@@ -48,10 +48,10 @@
 #include "geo/gdal.hpp"
 #include "geo/po.hpp"
 
-#include "./mvt.hpp"
+#include "mvt.hpp"
 
-#include "./mvt.hpp"
-#include "./detail/mbtiles.hpp"
+#include "mvt.hpp"
+#include "detail/mbtiles.hpp"
 
 namespace po = boost::program_options;
 namespace ba = boost::algorithm;
@@ -648,24 +648,37 @@ OGRLayer* MvtDataset::GetLayerByName(const char *name)
     return nullptr;
 }
 
+bool isRemotePath(const char *path)
+{
+    return ((ba::istarts_with(path, "http:")
+             || ba::istarts_with(path, "https:")
+             || ba::istarts_with(path, "ftp:")));
+}
+
 bool isRemoteMvt(::GDALOpenInfo *openInfo)
 {
     // protocol prefix and .mvt -> could be mvt
-    if ((ba::istarts_with(openInfo->pszFilename, "http:")
-         || ba::istarts_with(openInfo->pszFilename, "https:")
-         || ba::istarts_with(openInfo->pszFilename, "ftp:")))
-    {
+    if (isRemotePath(openInfo->pszFilename)) {
         if (ba::icontains(openInfo->pszFilename, ".mvt")) { return true; }
         if (ba::icontains(openInfo->pszFilename, ".vector.pbf")) {
             return true;
         }
     }
+
     return false;
 }
 
 bool isMbTilesArchive(::GDALOpenInfo *openInfo)
 {
     return ba::icontains(openInfo->pszFilename, ".mbtiles/");
+}
+
+const char* isMvtPath(::GDALOpenInfo *openInfo)
+{
+    if (!ba::starts_with(openInfo->pszFilename, "mvt:")) {
+        return nullptr;
+    }
+    return openInfo->pszFilename + 4;
 }
 
 int MvtDataset::Identify(::GDALOpenInfo *openInfo)
@@ -720,11 +733,22 @@ GDALDataset* MvtDataset::Open(::GDALOpenInfo *openInfo)
     // TODO: detect
 
     // open
-
     std::unique_ptr<vector_tile::Tile> tile(new vector_tile::Tile());
 
+    const auto &loadLocal([&](const char *path) -> bool
+    {
+        std::ifstream f(path, std::ios::in | std::ios::binary);
+        return tile->ParseFromIstream(&f);
+    });
+
     try {
-        if (isRemoteMvt(openInfo)) {
+        if (auto mvtPath = isMvtPath(openInfo)) {
+            if (isRemotePath(mvtPath)) {
+                if (!loadFromRemote(*tile, mvtPath)) { return nullptr; }
+            } else if (!loadLocal(mvtPath)) {
+                return nullptr;
+            }
+        } else if (isRemoteMvt(openInfo)) {
             if (!loadFromRemote(*tile, openInfo->pszFilename)) {
                 return nullptr;
             }
@@ -734,12 +758,8 @@ GDALDataset* MvtDataset::Open(::GDALOpenInfo *openInfo)
             {
                 return nullptr;
             }
-        } else {
-            std::ifstream f(openInfo->pszFilename
-                            , std::ios::in | std::ios::binary);
-            if (!tile->ParseFromIstream(&f)) {
-                return nullptr;
-            }
+        } else if (!loadLocal(openInfo->pszFilename)) {
+            return nullptr;
         }
     } catch (...) {
         return nullptr;

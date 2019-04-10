@@ -35,7 +35,7 @@
 
 #include "dbglog/dbglog.hpp"
 
-#include "./mbtiles.hpp"
+#include "mbtiles.hpp"
 
 namespace bio = boost::iostreams;
 

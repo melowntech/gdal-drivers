@@ -792,7 +792,7 @@ GDALDataset* MvtDataset::Open(::GDALOpenInfo *openInfo)
     {
         try {
             extents = boost::lexical_cast<math::Extents2>(mvtExtents);
-        } catch (std::exception) {
+        } catch (const std::exception&) {
             CPLError(CE_Failure, CPLE_IllegalArg
                      , "MVT Dataset initialization failure: "
                      "failed to parse provided open options MVT_EXTENTS.");

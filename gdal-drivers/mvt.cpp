@@ -309,7 +309,7 @@ std::unique_ptr< ::OGRGeometry> points(GeometryReader &gr)
         g->addGeometryDirectly(new ::OGRPoint(gr.x(cur.x), gr.y(cur.y)));
     }
 
-    return std::move(g);
+    return g;
 }
 
 template <typename Type = ::OGRLineString>
@@ -370,8 +370,8 @@ std::unique_ptr< ::OGRGeometry> lineStrings(GeometryReader &gr)
     }
 
     // single or multi?
-    if (single) { return std::move(single); }
-    return std::move(multi);
+    if (single) { return single; }
+    return multi;
 }
 
 std::unique_ptr< ::OGRGeometry> polygons(GeometryReader &gr)
@@ -409,8 +409,8 @@ std::unique_ptr< ::OGRGeometry> polygons(GeometryReader &gr)
     }
 
     // single or multi?
-    if (single) { return std::move(single); }
-    return std::move(multi);
+    if (single) { return single; }
+    return multi;
 }
 
 std::unique_ptr< ::OGRGeometry>

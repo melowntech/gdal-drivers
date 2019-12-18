@@ -8,10 +8,13 @@ set(gdal-drivers_SOURCES
 
   mask.hpp mask.cpp
   solid.hpp solid.cpp
+  blender.hpp blender.cpp
 
   mvt.hpp mvt.cpp
 
   detail/mbtiles.hpp
+  detail/extents.hpp
+  detail/geotransform.hpp
   )
 
 if(Sqlite3_FOUND)

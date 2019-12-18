@@ -1,5 +1,5 @@
 /**
- * Copyright (c) 2017 Melown Technologies SE
+ * Copyright (c) 2019 Melown Technologies SE
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -23,20 +23,28 @@
  * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
  * POSSIBILITY OF SUCH DAMAGE.
  */
-#include "./mask.hpp"
-#include "./solid.hpp"
-#include "./blender.hpp"
-#include "./mvt.hpp"
 
-namespace gdal_drivers {
+#ifndef gdal_drivers_detail_extents_hpp_included_
+#define gdal_drivers_detail_extents_hpp_included_
 
-void registerAll()
-{
-    // put new drivers here
-    GDALRegister_MaskDataset();
-    GDALRegister_SolidDataset();
-    GDALRegister_BlendingDataset();
-    GDALRegister_MvtDataset();
+#include <boost/variant.hpp>
+
+#include "math/geometry_core.hpp"
+#include "geo/geotransform.hpp"
+
+namespace gdal_drivers { namespace detail {
+
+typedef boost::variant<math::Extents2, geo::GeoTransform>
+    ExtentsOrGeoTransform;
+
+inline const math::Extents2* extents(const ExtentsOrGeoTransform &eog) {
+    return boost::get<math::Extents2>(&eog);
 }
 
-} // namespace gdal_drivers
+inline const geo::GeoTransform* geoTransform(const ExtentsOrGeoTransform &eog) {
+    return boost::get<geo::GeoTransform>(&eog);
+}
+
+} } // namespace gdal_drivers::detail
+
+#endif // gdal_drivers_detail_extents_hpp_included_

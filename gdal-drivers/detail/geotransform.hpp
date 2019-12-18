@@ -1,5 +1,5 @@
 /**
- * Copyright (c) 2017 Melown Technologies SE
+ * Copyright (c) 2019 Melown Technologies SE
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -23,20 +23,39 @@
  * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
  * POSSIBILITY OF SUCH DAMAGE.
  */
-#include "./mask.hpp"
-#include "./solid.hpp"
-#include "./blender.hpp"
-#include "./mvt.hpp"
 
-namespace gdal_drivers {
+#ifndef gdal_drivers_detail_geotransform_hpp_included_
+#define gdal_drivers_detail_geotransform_hpp_included_
 
-void registerAll()
+#include <iostream>
+
+#include "geo/geotransform.hpp"
+
+namespace gdal_drivers { namespace detail {
+
+struct GeoTransformWrapper {
+    geo::GeoTransform value;
+};
+
+template<typename CharT, typename Traits>
+inline std::basic_istream<CharT, Traits>&
+operator>>(std::basic_istream<CharT, Traits> &is, GeoTransformWrapper &g)
 {
-    // put new drivers here
-    GDALRegister_MaskDataset();
-    GDALRegister_SolidDataset();
-    GDALRegister_BlendingDataset();
-    GDALRegister_MvtDataset();
+    auto &v(g.value);
+    auto comma(utility::expect<CharT>(','));
+    return is >> v[0] >> comma >> v[1] >> comma >> v[2]
+              >> comma >> v[3] >> comma >> v[4] >> comma >> v[5];
 }
 
-} // namespace gdal_drivers
+template<typename CharT, typename Traits>
+inline std::basic_ostream<CharT, Traits>&
+operator<<(std::basic_ostream<CharT, Traits> &os, const GeoTransformWrapper &g)
+{
+    const auto &v(g.value);
+    return os << v[0] << ',' << v[1] << ',' << v[2]
+              << ',' << v[3] << ',' << v[4] << ',' << v[5];
+}
+
+} } // namespace gdal_drivers::detail
+
+#endif // gdal_drivers_detail_geotransform_hpp_included_

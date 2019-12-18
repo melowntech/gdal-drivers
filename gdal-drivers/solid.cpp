@@ -42,38 +42,12 @@
 #include "geo/gdal.hpp"
 #include "geo/po.hpp"
 
-#include "./solid.hpp"
+#include "detail/geotransform.hpp"
+#include "solid.hpp"
 
 namespace po = boost::program_options;
 
 namespace gdal_drivers {
-
-namespace {
-
-struct GeoTransformWrapper {
-    geo::GeoTransform value;
-};
-
-template<typename CharT, typename Traits>
-inline std::basic_istream<CharT, Traits>&
-operator>>(std::basic_istream<CharT, Traits> &is, GeoTransformWrapper &g)
-{
-    auto &v(g.value);
-    auto comma(utility::expect<CharT>(','));
-    return is >> v[0] >> comma >> v[1] >> comma >> v[2]
-              >> comma >> v[3] >> comma >> v[4] >> comma >> v[5];
-}
-
-template<typename CharT, typename Traits>
-inline std::basic_ostream<CharT, Traits>&
-operator<<(std::basic_ostream<CharT, Traits> &os, const GeoTransformWrapper &g)
-{
-    const auto &v(g.value);
-    return os << v[0] << ',' << v[1] << ',' << v[2]
-              << ',' << v[3] << ',' << v[4] << ',' << v[5];
-}
-
-} // namespace
 
 void writeConfig(const boost::filesystem::path &file
                  , const SolidDataset::Config &config)
@@ -93,7 +67,7 @@ void writeConfig(const boost::filesystem::path &file
     if (const auto *extents = config.extents()) {
         f << "\nextents = " << *extents;
     } if (const auto *geoTransform = config.geoTransform()) {
-        f << "\ngeoTransform = " << GeoTransformWrapper{*geoTransform};
+        f << "\ngeoTransform = " << detail::GeoTransformWrapper{*geoTransform};
     } else {
         LOGTHROW(err1, std::runtime_error)
             << "Neither extents nor geoTransform are set.";
@@ -209,7 +183,7 @@ GDALDataset* SolidDataset::Open(GDALOpenInfo *openInfo)
          , "Size of dataset (WxH).")
         ("solid.extents", po::value<math::Extents2>()
          , "Geo extents of dataset (ulx,uly:urx,ury).")
-        ("solid.geoTransform", po::value<GeoTransformWrapper>()
+        ("solid.geoTransform", po::value<detail::GeoTransformWrapper>()
          , "Geo transform matrix (m00, m01, m02, m10, m11, m12).")
         ("solid.tileSize", po::value(&cfg.tileSize)
          ->default_value(math::Size2(256, 256))->required()
@@ -276,7 +250,8 @@ GDALDataset* SolidDataset::Open(GDALOpenInfo *openInfo)
             cfg.extents(vm["solid.extents"].as<math::Extents2>());
         } else {
             cfg.geoTransform
-                (vm["solid.geoTransform"].as<GeoTransformWrapper>().value);
+                (vm["solid.geoTransform"].as<detail::GeoTransformWrapper>()
+                 .value);
         }
 
         // process bands
@@ -478,12 +453,12 @@ CPLErr SolidDataset::RasterBand::IReadBlock(int, int, void *rawImage)
 
 const math::Extents2* SolidDataset::Config::extents() const
 {
-    return boost::get<math::Extents2>(&extentsOrGeoTransform);
+    return detail::extents(extentsOrGeoTransform_);
 }
 
 const geo::GeoTransform* SolidDataset::Config::geoTransform() const
 {
-    return boost::get<geo::GeoTransform>(&extentsOrGeoTransform);
+    return detail::geoTransform(extentsOrGeoTransform_);
 }
 
 std::unique_ptr<SolidDataset>

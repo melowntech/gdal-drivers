@@ -48,10 +48,10 @@
 #include "geo/gdal.hpp"
 #include "geo/po.hpp"
 
-#include "mvt.hpp"
+#include "./mvt.hpp"
 
-#include "mvt.hpp"
-#include "detail/mbtiles.hpp"
+#include "./mvt.hpp"
+#include "./detail/mbtiles.hpp"
 
 namespace po = boost::program_options;
 namespace ba = boost::algorithm;
@@ -309,7 +309,7 @@ std::unique_ptr< ::OGRGeometry> points(GeometryReader &gr)
         g->addGeometryDirectly(new ::OGRPoint(gr.x(cur.x), gr.y(cur.y)));
     }
 
-    return g;
+    return std::move(g);
 }
 
 template <typename Type = ::OGRLineString>
@@ -370,8 +370,8 @@ std::unique_ptr< ::OGRGeometry> lineStrings(GeometryReader &gr)
     }
 
     // single or multi?
-    if (single) { return single; }
-    return multi;
+    if (single) { return std::move(single); }
+    return std::move(multi);
 }
 
 std::unique_ptr< ::OGRGeometry> polygons(GeometryReader &gr)
@@ -409,8 +409,8 @@ std::unique_ptr< ::OGRGeometry> polygons(GeometryReader &gr)
     }
 
     // single or multi?
-    if (single) { return single; }
-    return multi;
+    if (single) { return std::move(single); }
+    return std::move(multi);
 }
 
 std::unique_ptr< ::OGRGeometry>
@@ -648,37 +648,24 @@ OGRLayer* MvtDataset::GetLayerByName(const char *name)
     return nullptr;
 }
 
-bool isRemotePath(const char *path)
-{
-    return ((ba::istarts_with(path, "http:")
-             || ba::istarts_with(path, "https:")
-             || ba::istarts_with(path, "ftp:")));
-}
-
 bool isRemoteMvt(::GDALOpenInfo *openInfo)
 {
     // protocol prefix and .mvt -> could be mvt
-    if (isRemotePath(openInfo->pszFilename)) {
+    if ((ba::istarts_with(openInfo->pszFilename, "http:")
+         || ba::istarts_with(openInfo->pszFilename, "https:")
+         || ba::istarts_with(openInfo->pszFilename, "ftp:")))
+    {
         if (ba::icontains(openInfo->pszFilename, ".mvt")) { return true; }
         if (ba::icontains(openInfo->pszFilename, ".vector.pbf")) {
             return true;
         }
     }
-
     return false;
 }
 
 bool isMbTilesArchive(::GDALOpenInfo *openInfo)
 {
     return ba::icontains(openInfo->pszFilename, ".mbtiles/");
-}
-
-const char* isMvtPath(::GDALOpenInfo *openInfo)
-{
-    if (!ba::starts_with(openInfo->pszFilename, "mvt:")) {
-        return nullptr;
-    }
-    return openInfo->pszFilename + 4;
 }
 
 int MvtDataset::Identify(::GDALOpenInfo *openInfo)
@@ -733,22 +720,11 @@ GDALDataset* MvtDataset::Open(::GDALOpenInfo *openInfo)
     // TODO: detect
 
     // open
+
     std::unique_ptr<vector_tile::Tile> tile(new vector_tile::Tile());
 
-    const auto &loadLocal([&](const char *path) -> bool
-    {
-        std::ifstream f(path, std::ios::in | std::ios::binary);
-        return tile->ParseFromIstream(&f);
-    });
-
     try {
-        if (auto mvtPath = isMvtPath(openInfo)) {
-            if (isRemotePath(mvtPath)) {
-                if (!loadFromRemote(*tile, mvtPath)) { return nullptr; }
-            } else if (!loadLocal(mvtPath)) {
-                return nullptr;
-            }
-        } else if (isRemoteMvt(openInfo)) {
+        if (isRemoteMvt(openInfo)) {
             if (!loadFromRemote(*tile, openInfo->pszFilename)) {
                 return nullptr;
             }
@@ -758,8 +734,12 @@ GDALDataset* MvtDataset::Open(::GDALOpenInfo *openInfo)
             {
                 return nullptr;
             }
-        } else if (!loadLocal(openInfo->pszFilename)) {
-            return nullptr;
+        } else {
+            std::ifstream f(openInfo->pszFilename
+                            , std::ios::in | std::ios::binary);
+            if (!tile->ParseFromIstream(&f)) {
+                return nullptr;
+            }
         }
     } catch (...) {
         return nullptr;
@@ -792,7 +772,7 @@ GDALDataset* MvtDataset::Open(::GDALOpenInfo *openInfo)
     {
         try {
             extents = boost::lexical_cast<math::Extents2>(mvtExtents);
-        } catch (const std::exception&) {
+        } catch (std::exception) {
             CPLError(CE_Failure, CPLE_IllegalArg
                      , "MVT Dataset initialization failure: "
                      "failed to parse provided open options MVT_EXTENTS.");

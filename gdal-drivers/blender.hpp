@@ -1,5 +1,5 @@
 /**
- * Copyright (c) 2017 Melown Technologies SE
+ * Copyright (c) 2019 Melown Technologies SE
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -23,15 +23,9 @@
  * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
  * POSSIBILITY OF SUCH DAMAGE.
  */
-/**
- * @file solid.hpp
- * @author Vaclav Blazek <vaclav.blazek@citationtech.net>
- *
- * Virtual GDAL driver that returns solid valid in whole extents.
- */
 
-#ifndef gdal_drivers_solid_hpp_included_
-#define gdal_drivers_solid_hpp_included_
+#ifndef gdal_drivers_blender_hpp_included_
+#define gdal_drivers_blender_hpp_included_
 
 #include <gdal_priv.h>
 
@@ -39,13 +33,12 @@
 #include <array>
 #include <vector>
 
+#include <boost/variant.hpp>
 #include <boost/filesystem/path.hpp>
 
 #include "math/geometry_core.hpp"
 #include "geo/srsdef.hpp"
 #include "geo/geotransform.hpp"
-
-#include "detail/extents.hpp"
 
 namespace gdal_drivers {
 
@@ -53,65 +46,41 @@ namespace gdal_drivers {
  * @brief GttDataset
  */
 
-class SolidDataset : public GDALDataset {
+class BlendingDataset : public ::GDALDataset {
 public:
     static ::GDALDataset* Open(GDALOpenInfo *openInfo);
 
-    static ::GDALDataset* CreateCopy(const char *path, ::GDALDataset *src
-                                     , int strict, char **options
-                                     , GDALProgressFunc progress
-                                     , void *progressData);
-
-    virtual ~SolidDataset() {};
+    virtual ~BlendingDataset() {};
 
     virtual CPLErr GetGeoTransform(double *padfTransform);
     virtual const char *GetProjectionRef();
 
     class Config {
     public:
-        geo::SrsDefinition srs;
-        math::Size2 size;
-        math::Size2 tileSize;
+        struct Dataset {
+            boost::filesystem::path path;
+            math::Extents2 inside;
 
-        struct Band {
-            double value;
-            ::GDALDataType dataType;
-            ::GDALColorInterp colorInterpretation;
-
-            typedef std::vector<Band> list;
-
-            Band() : value() {}
-            Band(double value, ::GDALDataType dataType
-                 , ::GDALColorInterp colorInterpretation)
-                : value(value), dataType(dataType)
-                , colorInterpretation(colorInterpretation)
-            {}
+            typedef std::vector<Dataset> list;
         };
-        Band::list bands;
 
-        Config() : tileSize(256, 256) {}
-
-        void extents(const math::Extents2 &e) {
-            extentsOrGeoTransform_ = e;
-        }
-        const math::Extents2* extents() const;
-
-        void geoTransform(const geo::GeoTransform &g) {
-            extentsOrGeoTransform_ = g;
-        }
-        const geo::GeoTransform* geoTransform() const;
-
-    private:
-        detail::ExtentsOrGeoTransform extentsOrGeoTransform_;
+        geo::SrsDefinition srs;
+        math::Extents2 extents;
+        double overlap = 0;
+        Dataset::list datasets;
     };
 
     /** Creates new solid dataset and return pointer to it.
      */
-    static std::unique_ptr<SolidDataset>
+    static std::unique_ptr<BlendingDataset>
     create(const boost::filesystem::path &path, const Config &config);
 
+    BlendingDataset(const Config &config);
+
+    typedef std::unique_ptr< ::GDALDataset> Dataset;
+    typedef std::vector<Dataset> Datasets;
+
 private:
-    SolidDataset(const Config &config);
 
     class RasterBand;
     friend class RasterBand;
@@ -120,13 +89,15 @@ private:
     Config config_;
     std::string srs_;
     geo::GeoTransform geoTransform_;
+
+    Datasets datasets_;
 };
 
 } // namespace gdal_drivers
 
 // driver registration function
 CPL_C_START
-void GDALRegister_SolidDataset(void);
+void GDALRegister_BlendingDataset(void);
 CPL_C_END
 
-#endif // gdal_drivers_solid_hpp_included_
+#endif // gdal_drivers_blender_hpp_included_

@@ -71,12 +71,11 @@ void writeConfig(const fs::path &file, const BlendingDataset::Config &config)
 namespace {
 
 struct ImageReference {
-    math::Extents2i extents;
-    math::Extents2i inside;
+    cv::Rect extents;
+    cv::Rect inside;
 
     ImageReference() = default;
-    ImageReference(const math::Extents2i &extents
-                   , const math::Extents2i &inside)
+    ImageReference(const cv::Rect &extents, const cv::Rect &inside)
         : extents(extents), inside(inside)
     {}
 
@@ -297,16 +296,25 @@ BlendingDataset::BlendingDataset(const Config &config)
         geoTransform_[5] = -resolution(1);
     }
 
-    const auto &pixelExtents([&](const math::Extents2 &e)
+    const auto &point2pixel([&](const math::Point2 &p)
     {
-        const math::Point2 shiftd(ul(e) - ul(extents));
-        const math::Point2i ll(int(std::round(shiftd(0) / resolution(0)))
-                               , -int(std::round(shiftd(1) / resolution(1))));
+        const math::Point2 shiftd(ul(extents) - p);
+        return math::Point2i(int(std::round(shiftd(0) / resolution(0)))
+                             , -int(std::round(shiftd(1) / resolution(1))));
+    });
 
-        math::Extents2i res(ll);
-        res.ur(0) += des.size.width;
-        res.ur(1) += des.size.height;
-        return res;
+    const auto &pixelExtents([&](const math::Extents2 &e
+                                 , const math::Size2 &size)
+    {
+        const auto ll(point2pixel(ul(e)));
+        return cv::Rect(ll(0), ll(1), size.width, size.height);
+    });
+
+    const auto &pixelInside([&](const math::Extents2 &e)
+    {
+        const auto ll(point2pixel(ul(e)));
+        const auto ur(point2pixel(lr(e)));
+        return cv::Rect(ll(0), ll(1), ll(0) - ur(0), ll(1) - ur(1));
     });
 
     // compute references
@@ -317,12 +325,12 @@ BlendingDataset::BlendingDataset(const Config &config)
         // LOG(info4) << std::fixed << "extents: " << des.extents;
         // LOG(info4) << std::fixed << "inside:  " << ds.inside;
 
-        references.emplace_back(pixelExtents(des.extents)
-                                , pixelExtents(align(ds.inside)));
+        references.emplace_back(pixelExtents(des.extents, des.size)
+                                , pixelInside(align(ds.inside)));
 
-        // const auto &ref(references.back());
-        // LOG(info4) << std::fixed << "px extents: " << ref.extents;
-        // LOG(info4) << std::fixed << "px inside:  " << ref.inside;
+        const auto &ref(references.back());
+        LOG(info4) << std::fixed << "px extents: " << ref.extents;
+        LOG(info4) << std::fixed << "px inside:  " << ref.inside;
     }
 
     // create bands
@@ -363,26 +371,81 @@ BlendingDataset::RasterBand
     eDataType = bands_.front().band->GetRasterDataType();
 }
 
+namespace {
+
+int gdal2cv(GDALDataType type)
+{
+    switch (type) {
+    case GDT_Byte: return CV_8UC1;
+    case GDT_UInt16: return CV_16UC1;
+    case GDT_Int16: return CV_16SC1;
+    case GDT_UInt32: return CV_32SC1;
+    case GDT_Int32: return CV_32SC1;
+    case GDT_Float32: return CV_32FC1;
+    case GDT_Float64: return CV_64FC1;
+
+    default:
+        LOGTHROW(err2, std::logic_error)
+            << "Unsupported datatype " << type << " in raster.";
+    }
+    return 0; // never reached
+}
+
+} // namespace
+
 CPLErr BlendingDataset::RasterBand::IReadBlock(int nBlockXOff, int nBlockYOff
                                                , void *rawImage)
 {
-    math::Extents2i block(nBlockXOff * nBlockXSize
-                          , nBlockYOff * nBlockYSize
-                          , (nBlockXOff + 1) * nBlockXSize
-                          , (nBlockYOff + 1) * nBlockYSize);
+    cv::Rect block(nBlockXOff * nBlockXSize
+                   , nBlockYOff * nBlockYSize
+                   , nBlockXSize, nBlockYSize);
 
     LOG(info4) << "reading block: [" << nBlockXOff << ", " << nBlockYOff
                << "]: " << block;
 
+    // image accumulator
+    cv::Mat_<double> acc(nBlockXSize, nBlockYSize, 0.0);
+
     // for each band
     for (auto &band : bands_) {
         // compute source block
-        
+        auto roi(block & band.ref.extents);
+        if (!roi.area()) { continue; }
+
+        const auto origin(roi.tl() - block.tl());
+
+        LOG(info4) << "extents: " << band.ref.extents;
+        LOG(info4) << "block: " << block;
+        LOG(info4) << "origin: " << origin;
+        LOG(info4) << "roi: " << roi;
+        // localize
+        const auto local(roi - band.ref.extents.tl());
+        LOG(info4) << "local: " << local;
+        cv::Mat_<double> tmp(local.size());
+
         // read block via generic RasterIO
-        // band.band->RasterIO
+        const auto err
+            (band.band->RasterIO(GF_Read
+                                 , local.x, local.y
+                                 , local.width, local.height
+                                 , tmp.data
+                                 , local.width, local.height
+                                 , GDT_Float64
+                                 , tmp.elemSize()
+                                 , local.width * tmp.elemSize()
+                                 , nullptr));
+
+        if (err != CE_None) { return err; }
+
+        // TODO: add data to accumulator
     }
 
-    (void) rawImage;
+    // copy data into output image
+    {
+        const auto type(gdal2cv(bands_.front().band->GetRasterDataType()));
+        cv::Mat out(nBlockYSize, nBlockXSize, type, rawImage);
+        acc.convertTo(out, type);
+    }
     return CE_None;
 }
 

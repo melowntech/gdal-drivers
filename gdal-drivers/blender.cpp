@@ -26,6 +26,7 @@
 
 #include <cstdlib>
 #include <algorithm>
+#include <numeric>
 #include <vector>
 #include <iterator>
 #include <fstream>
@@ -56,12 +57,18 @@ void writeConfig(const fs::path &file, const BlendingDataset::Config &config)
       << "\nsrs = " << config.srs
       << "\nextents = " << config.extents
       << "\noverlap = " << config.overlap
-      << "\n\n";
+        ;
+
+    if (config.resolution) {
+        f  << "\nresolution = " << config.resolution.value();
+    }
+
+    f << "\n\n";
 
     for (const auto &ds : config.datasets) {
         f << "\n[dataset]"
           << "\npath = " << ds.path
-          << "\ninside = " << ds.inside
+          << "\nvalid = " << ds.valid
           << "\n";
     }
 
@@ -71,18 +78,20 @@ void writeConfig(const fs::path &file, const BlendingDataset::Config &config)
 namespace {
 
 struct ImageReference {
+    fs::path path;
     cv::Rect extents;
-    cv::Rect inside;
+    cv::Rect2d valid;
 
     ImageReference() = default;
-    ImageReference(const cv::Rect &extents, const cv::Rect &inside)
-        : extents(extents), inside(inside)
+    ImageReference(const fs::path &path, const cv::Rect &extents
+                   , const cv::Rect2d &valid)
+        : path(path), extents(extents), valid(valid)
     {}
 
     typedef std::vector<ImageReference> list;
 };
 
-const auto epsilon(1e-6);
+const auto epsilon(1e-4);
 
 bool almostSame(double a, double b)
 {
@@ -152,6 +161,7 @@ void checkCompatibility(const fs::path &refPath, ::GDALDataset *ref
 struct Descriptor {
     math::Extents2 extents;
     math::Size2 size;
+    math::Point2d resolution;
 
     Descriptor() = default;
     Descriptor(::GDALDataset *ds);
@@ -161,6 +171,7 @@ struct Descriptor {
 
 Descriptor::Descriptor(::GDALDataset *ds)
     : size(ds->GetRasterXSize(), ds->GetRasterYSize())
+    , resolution(getResolution(ds))
 {
     geo::GeoTransform gt;
     ds->GetGeoTransform(gt.data());
@@ -215,6 +226,7 @@ public:
 private:
     /** List of source bands.
      */
+    BlendingDataset *dset_;
     Band::list bands_;
 };
 
@@ -262,7 +274,15 @@ BlendingDataset::BlendingDataset(const Config &config)
 
         origin(0) = gt[0];
         origin(1) = gt[3];
-        resolution = getResolution(gt);
+
+        if (config.resolution) {
+            // use provided resolution, no check is done
+            resolution = { config.resolution->width
+                           , config.resolution->height };
+        } else {
+            // use first dataset resolution
+            resolution = getResolution(gt);
+        }
     }
 
     const auto &align([&](const math::Extents2 &extents)
@@ -271,7 +291,7 @@ BlendingDataset::BlendingDataset(const Config &config)
         for (int i = 0; i < 2; ++i) {
             res.ll(i) = ((std::floor(res.ll(i) / resolution(i))
                           * resolution(i) + origin(i)));
-            res.ur(i) = ((std::floor(res.ur(i) / resolution(i))
+            res.ur(i) = ((std::ceil(res.ur(i) / resolution(i))
                           * resolution(i) + origin(i)));
         }
         return res;
@@ -294,27 +314,39 @@ BlendingDataset::BlendingDataset(const Config &config)
         geoTransform_[3] = extents.ur(1);
         geoTransform_[4] = 0.0;
         geoTransform_[5] = -resolution(1);
+
+        overlap_.width = config.overlap * resolution(0);
+        overlap_.height = config.overlap * resolution(1);
     }
 
-    const auto &point2pixel([&](const math::Point2 &p)
+    const auto &point2pixel([&](const math::Point2 &p
+                                , const math::Point2d &res)
     {
-        const math::Point2 shiftd(ul(extents) - p);
-        return math::Point2i(int(std::round(shiftd(0) / resolution(0)))
-                             , -int(std::round(shiftd(1) / resolution(1))));
+        const math::Point2 shiftd(p - ul(extents));
+        return math::Point2i(shiftd(0) / res(0), -shiftd(1) / res(1));
     });
 
     const auto &pixelExtents([&](const math::Extents2 &e
-                                 , const math::Size2 &size)
+                                 , const math::Size2 &size
+                                 , const math::Point2d &res)
     {
-        const auto ll(point2pixel(ul(e)));
+        const auto ll(point2pixel(ul(e), res));
         return cv::Rect(ll(0), ll(1), size.width, size.height);
     });
 
-    const auto &pixelInside([&](const math::Extents2 &e)
+    const auto &point2pixeld([&](const math::Point2d &p
+                                 , const math::Point2d &res)
     {
-        const auto ll(point2pixel(ul(e)));
-        const auto ur(point2pixel(lr(e)));
-        return cv::Rect(ll(0), ll(1), ll(0) - ur(0), ll(1) - ur(1));
+        const math::Point2d shiftd(p - ul(extents));
+        return math::Point2d(shiftd(0) / res(0), -shiftd(1) / res(1));
+    });
+
+    const auto &pixelValid([&](const math::Extents2 &e
+                               , const math::Point2d &res)
+    {
+        const auto ll(point2pixeld(ul(e), res));
+        const auto ur(point2pixeld(lr(e), res));
+        return cv::Rect2d(ll(0), ll(1), ur(0) - ll(0), ur(1) - ll(1));
     });
 
     // compute references
@@ -322,15 +354,17 @@ BlendingDataset::BlendingDataset(const Config &config)
     for (const auto &ds : config_.datasets) {
         const auto &des(*idescriptors++);
 
-        // LOG(info4) << std::fixed << "extents: " << des.extents;
-        // LOG(info4) << std::fixed << "inside:  " << ds.inside;
+        references.emplace_back(ds.path
+                                , pixelExtents(des.extents, des.size
+                                               , resolution)
+                                , pixelValid(ds.valid, resolution));
 
-        references.emplace_back(pixelExtents(des.extents, des.size)
-                                , pixelInside(align(ds.inside)));
-
-        const auto &ref(references.back());
-        LOG(info4) << std::fixed << "px extents: " << ref.extents;
-        LOG(info4) << std::fixed << "px inside:  " << ref.inside;
+        // const auto &ref(references.back());
+        // LOG(info4) << "ds: " << ds.path;
+        // LOG(info4) << "    size: " << des.size;
+        // LOG(info4) << std::fixed << "    extents: " << des.extents;
+        // LOG(info4) << std::fixed << "    px extents: " << ref.extents;
+        // LOG(info4) << std::fixed << "    px valid:  " << ref.valid;
     }
 
     // create bands
@@ -356,6 +390,7 @@ const char* BlendingDataset::GetProjectionRef()
 BlendingDataset::RasterBand
 ::RasterBand(BlendingDataset *dset, int bandIndex
              , const ImageReference::list &references)
+    : dset_(dset)
 {
     bands_.reserve(dset->datasets_.size());
     auto ireferences(references.begin());
@@ -396,15 +431,17 @@ int gdal2cv(GDALDataType type)
 CPLErr BlendingDataset::RasterBand::IReadBlock(int nBlockXOff, int nBlockYOff
                                                , void *rawImage)
 {
+    using Image = cv::Mat_<double>;
+
     cv::Rect block(nBlockXOff * nBlockXSize
                    , nBlockYOff * nBlockYSize
                    , nBlockXSize, nBlockYSize);
 
-    LOG(info4) << "reading block: [" << nBlockXOff << ", " << nBlockYOff
-               << "]: " << block;
+    // LOG(info4) << "reading block: [" << nBlockXOff << ", " << nBlockYOff
+    //            << "]: " << block;
 
-    // image accumulator
-    cv::Mat_<double> acc(nBlockXSize, nBlockYSize, 0.0);
+    Image acc(nBlockXSize, nBlockYSize, 0.0);
+    Image wacc(nBlockXSize, nBlockYSize, 0.0);
 
     // for each band
     for (auto &band : bands_) {
@@ -412,36 +449,113 @@ CPLErr BlendingDataset::RasterBand::IReadBlock(int nBlockXOff, int nBlockYOff
         auto roi(block & band.ref.extents);
         if (!roi.area()) { continue; }
 
-        const auto origin(roi.tl() - block.tl());
+        // LOG(info4) << "src: " << band.ref.path;
+        // LOG(info4) << "extents: " << band.ref.extents;
+        // LOG(info4) << "block: " << block;
+        // LOG(info4) << "roi: " << roi;
 
-        LOG(info4) << "extents: " << band.ref.extents;
-        LOG(info4) << "block: " << block;
-        LOG(info4) << "origin: " << origin;
-        LOG(info4) << "roi: " << roi;
         // localize
         const auto local(roi - band.ref.extents.tl());
-        LOG(info4) << "local: " << local;
-        cv::Mat_<double> tmp(local.size());
+        // LOG(info4) << "local: " << local;
+
+        // view into block
+        const auto origin(roi.tl() - block.tl());
+        const cv::Rect view(origin.x, origin.y, local.width, local.height);
+        // LOG(info4) << "origin: " << origin;
+        // LOG(info4) << "view: " << view;
+
+        Image image(local.size());
 
         // read block via generic RasterIO
         const auto err
             (band.band->RasterIO(GF_Read
                                  , local.x, local.y
                                  , local.width, local.height
-                                 , tmp.data
+                                 , image.data
                                  , local.width, local.height
                                  , GDT_Float64
-                                 , tmp.elemSize()
-                                 , local.width * tmp.elemSize()
+                                 , image.elemSize(), image.step
                                  , nullptr));
 
         if (err != CE_None) { return err; }
 
-        // TODO: add data to accumulator
+        // get weights
+        Image weights(local.size(), 1.0);
+        if (!(band.band->GetMaskFlags() & GMF_ALL_VALID)) {
+            // not all pixels valid, load weights from weights band
+            auto mb(band.band->GetMaskBand());
+
+            const auto err
+                (mb->RasterIO(GF_Read
+                              , local.x, local.y
+                              , local.width, local.height
+                              , weights.data
+                              , local.width, local.height
+                              , GDT_Float64
+                              , weights.elemSize(), weights.step
+                              , nullptr));
+            if (err != CE_None) { return err; }
+            for (auto &px : weights) { if (px) { px = 1.0; } }
+        }
+
+        // compute weight for each pixel
+        const auto overlap(dset_->overlap_);
+
+        if (math::empty(overlap)) {
+            // no overlap, use only pixels inside the valid image area
+            const auto &valid(band.ref.valid);
+            cv::Point2f p(roi.x + 0.5, roi.y + 0.5);
+            for (int j = 0; j < weights.rows; ++j, ++p.y) {
+                auto pp(p);
+                for (int i = 0; i < weights.cols; ++i, ++pp.x) {
+                    // LOG(info4) << "px: " << i << "," << j;
+                    // LOG(info4) << "valid: " << std::fixed
+                    //            << valid.tl() << ":" << valid.br();
+                    // LOG(info4) << "pp: " << std::fixed << pp;
+                    // invalidate pixel ouside of valid area
+                    if (!valid.contains(pp)) { weights(j, i) = 0.0; }
+                }
+            }
+        } else {
+            // apply overlap, take into acount pixels ouside the valid image
+            // area
+            const auto &valid(band.ref.valid);
+
+            // full kernel area
+            const auto kernelArea(4 * math::area(overlap));
+
+            // base kernel at image's upper-left corner
+            cv::Rect2d
+                k(roi.x - overlap.width + 0.5
+                  , roi.y - overlap.height + 0.5
+                  , overlap.width * 2, overlap.height * 2);
+
+            for (int j = 0; j < weights.rows; ++j, ++k.y) {
+                auto kernel(k);
+                for (int i = 0; i < weights.cols; ++i, ++kernel.x) {
+                    // are of kernel clipped by "valid" extents
+                    const auto area((valid & kernel).area());
+                    // apply weight
+                    weights(j, i) *= (area / kernelArea);
+                }
+            }
+        }
+
+        // add weighted data to accumulator
+        cv::multiply(image, weights, image);
+        Image(acc, view) += image;
+
+        // update weight total
+        Image(wacc, view) += weights;
     }
 
-    // copy data into output image
+    // set weight for invaid pixels to 1 to not divide by zero
+    wacc.setTo(1.0, (wacc == 0.0));
+    // apply weights total to accumulated image
+    acc /= wacc;
+
     {
+        // copy data into output image
         const auto type(gdal2cv(bands_.front().band->GetRasterDataType()));
         cv::Mat out(nBlockYSize, nBlockXSize, type, rawImage);
         acc.convertTo(out, type);
@@ -464,6 +578,8 @@ GDALDataset* BlendingDataset::Open(GDALOpenInfo *openInfo)
          , "Geo extents of dataset (ulx,uly:urx,ury).")
         ("blender.overlap", po::value(&cfg.overlap)->required()
          , "Blending dataset overlap.")
+        ("blender.resolution", po::value<math::Size2f>()
+         , "Resolution of dataset. Defaults to first dataset resolution.")
         ;
 
     using utility::multi_value;
@@ -471,7 +587,7 @@ GDALDataset* BlendingDataset::Open(GDALOpenInfo *openInfo)
     config.add_options()
         ("dataset.path", multi_value<decltype(Config::Dataset::path)>()
          , "Value to return.")
-        ("dataset.inside", multi_value<decltype(Config::Dataset::inside)>()
+        ("dataset.valid", multi_value<decltype(Config::Dataset::valid)>()
          , "Data type.")
         ;
 
@@ -503,14 +619,18 @@ GDALDataset* BlendingDataset::Open(GDALOpenInfo *openInfo)
         po::store(parsed, vm);
         po::notify(vm);
 
+        if (vm.count("blender.resolution")) {
+            cfg.resolution = vm["blender.resolution"].as<math::Size2f>();
+        }
+
         // process bands
         auto &datasets(cfg.datasets);
         datasets.resize(vm["dataset.path"].as<std::vector<fs::path>>().size());
         using utility::process_multi_value;
         process_multi_value(vm, "dataset.path"
                             , datasets, &Config::Dataset::path);
-        process_multi_value(vm, "dataset.inside"
-                            , datasets, &Config::Dataset::inside);
+        process_multi_value(vm, "dataset.valid"
+                            , datasets, &Config::Dataset::valid);
         return new BlendingDataset(cfg);
     } catch (const std::runtime_error & e) {
         CPLError(CE_Failure, CPLE_IllegalArg

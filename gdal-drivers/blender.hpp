@@ -33,7 +33,7 @@
 #include <array>
 #include <vector>
 
-#include <boost/variant.hpp>
+#include <boost/optional.hpp>
 #include <boost/filesystem/path.hpp>
 
 #include "math/geometry_core.hpp"
@@ -59,7 +59,7 @@ public:
     public:
         struct Dataset {
             boost::filesystem::path path;
-            math::Extents2 inside;
+            math::Extents2 valid;
 
             typedef std::vector<Dataset> list;
         };
@@ -68,6 +68,7 @@ public:
         math::Extents2 extents;
         double overlap = 0;
         Dataset::list datasets;
+        boost::optional<math::Size2f> resolution;
     };
 
     /** Creates new solid dataset and return pointer to it.
@@ -89,6 +90,8 @@ private:
     Config config_;
     std::string srs_;
     geo::GeoTransform geoTransform_;
+
+    math::Size2f overlap_;
 
     Datasets datasets_;
 };

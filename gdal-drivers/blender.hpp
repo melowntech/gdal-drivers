@@ -62,6 +62,16 @@ public:
             math::Extents2 valid;
 
             typedef std::vector<Dataset> list;
+
+            Dataset() = default;
+            Dataset(const boost::filesystem::path &path
+                    , const math::Extents2 &valid)
+                : path(path), valid(valid)
+            {}
+
+            bool operator==(const Dataset &o) const {
+                return (path == o.path) && (valid == o.valid);
+            }
         };
 
         geo::SrsDefinition srs;
@@ -71,10 +81,15 @@ public:
         boost::optional<math::Size2f> resolution;
     };
 
-    /** Creates new solid dataset and return pointer to it.
+    /** Creates new blending dataset and returns open interface.
      */
     static std::unique_ptr<BlendingDataset>
     create(const boost::filesystem::path &path, const Config &config);
+
+    /** Creates blending dataset without writing it to disk.
+     */
+    static std::unique_ptr<BlendingDataset>
+    create(const Config &config);
 
     BlendingDataset(const Config &config);
 

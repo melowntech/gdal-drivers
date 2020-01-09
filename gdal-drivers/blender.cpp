@@ -32,17 +32,18 @@
 #include <fstream>
 #include <iomanip>
 
+#include <boost/algorithm/string/predicate.hpp>
+
 #include "dbglog/dbglog.hpp"
 
 #include "utility/raise.hpp"
 #include "utility/multivalue.hpp"
 #include "utility/streams.hpp"
-#include "geo/gdal.hpp"
-#include "geo/po.hpp"
 
 #include "blender.hpp"
 
 namespace po = boost::program_options;
+namespace ba = boost::algorithm;
 namespace fs = boost::filesystem;
 
 namespace gdal_drivers {
@@ -563,14 +564,16 @@ CPLErr BlendingDataset::RasterBand::IReadBlock(int nBlockXOff, int nBlockYOff
     return CE_None;
 }
 
-GDALDataset* BlendingDataset::Open(GDALOpenInfo *openInfo)
+/** Loads config from file. Used path only if non-null. If path is non-null then
+ *  it is a hard error to fail to load from it.
+ */
+bool configFromFile(BlendingDataset::Config &cfg, GDALOpenInfo *openInfo
+                    , const char *path = nullptr)
 {
-    ::CPLErrorReset();
+    using Config = BlendingDataset::Config;
 
     po::options_description config("blending GDAL driver");
     po::variables_map vm;
-    Config cfg;
-
     config.add_options()
         ("blender.srs", po::value(&cfg.srs)->required()
          , "SRS definition. Use [WKT], +proj or EPSG:num.")
@@ -593,25 +596,36 @@ GDALDataset* BlendingDataset::Open(GDALOpenInfo *openInfo)
 
     po::basic_parsed_options<char> parsed(&config);
 
-    // try to parse file -> cannot parse -> probably not a solid file format
+    // try to parse file -> cannot parse -> probably not a blending dataset file
+    // format
     try {
         std::ifstream f;
         f.exceptions(std::ifstream::failbit | std::ifstream::badbit);
-        f.open(openInfo->pszFilename);
+        f.open(path ? path : openInfo->pszFilename);
         f.exceptions(std::ifstream::badbit);
         parsed = (po::parse_config_file(f, config));
         if (parsed.options.empty()) {
-            // structure valid but nothing read -> not a solid file
-            return nullptr;
+            // structure valid but nothing read -> not a blend file
+            if (path) {
+                CPLError(CE_Failure, CPLE_IllegalArg
+                         , "Not a blending dataset.\n");
+            }
+            return false;
         }
-    } catch (...) { return nullptr; }
+    } catch (...) {
+        if (path) {
+            CPLError(CE_Failure, CPLE_IllegalArg
+                     , "Not a blending dataset.\n");
+        }
+        return false;
+    }
 
     // no updates
     if (openInfo->eAccess == GA_Update) {
         CPLError(CE_Failure, CPLE_NotSupported,
                  "The Blending driver does not support update "
                  "access to existing datasets.\n");
-        return nullptr;
+        return false;
     }
 
     // initialize dataset
@@ -631,6 +645,61 @@ GDALDataset* BlendingDataset::Open(GDALOpenInfo *openInfo)
                             , datasets, &Config::Dataset::path);
         process_multi_value(vm, "dataset.valid"
                             , datasets, &Config::Dataset::valid);
+    } catch (const std::runtime_error & e) {
+        CPLError(CE_Failure, CPLE_IllegalArg
+                 , "BlendingDataset initialization failure (%s).\n", e.what());
+        return false;
+    }
+
+    return true;
+}
+
+bool loadFromPointer(BlendingDataset::Config &cfg, GDALOpenInfo*
+                     , const char *spec)
+{
+    // load raw pointer as an hex integer
+    std::istringstream is(spec);
+    std::uintptr_t raw;
+    if (!(is >> std::hex >> raw)) {
+        CPLError(CE_Failure, CPLE_IllegalArg,
+                 "Bleding driver: Missing config pointer value.\n");
+        return false;
+    }
+
+    if (!raw) {
+        CPLError(CE_Failure, CPLE_IllegalArg,
+                 "Bleding driver: Invalid config pointer value.\n");
+        return false;
+    }
+
+    // copy from parameter
+    cfg = *reinterpret_cast<const BlendingDataset::Config*>(raw);
+    return true;
+}
+
+bool loadConfig(BlendingDataset::Config &cfg, GDALOpenInfo *openInfo)
+{
+    const std::string blenderPrefix("blender:");
+    const std::string ptrPrefix("blender:ptr=");
+    if (ba::istarts_with(openInfo->pszFilename, ptrPrefix)) {
+        return loadFromPointer(cfg, openInfo
+                               , openInfo->pszFilename + ptrPrefix.size());
+    } else if (ba::istarts_with(openInfo->pszFilename, blenderPrefix)) {
+        return configFromFile
+            (cfg, openInfo, openInfo->pszFilename + blenderPrefix.size());
+    }
+    return configFromFile(cfg, openInfo);
+}
+
+GDALDataset* BlendingDataset::Open(GDALOpenInfo *openInfo)
+{
+    ::CPLErrorReset();
+
+    Config cfg;
+    if (!loadConfig(cfg, openInfo)) { return nullptr; }
+
+    // initialize dataset
+    try {
         return new BlendingDataset(cfg);
     } catch (const std::runtime_error & e) {
         CPLError(CE_Failure, CPLE_IllegalArg
@@ -642,9 +711,15 @@ GDALDataset* BlendingDataset::Open(GDALOpenInfo *openInfo)
 std::unique_ptr<BlendingDataset>
 BlendingDataset::create(const fs::path &path, const Config &config)
 {
-    std::unique_ptr<BlendingDataset> solid(new BlendingDataset(config));
+    std::unique_ptr<BlendingDataset> ds(new BlendingDataset(config));
     writeConfig(path, config);
-    return solid;
+    return ds;
+}
+
+std::unique_ptr<BlendingDataset>
+BlendingDataset::create(const Config &config)
+{
+    return std::unique_ptr<BlendingDataset>(new BlendingDataset(config));
 }
 
 } // namespace gdal_drivers

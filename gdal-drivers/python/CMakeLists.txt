@@ -1,0 +1,17 @@
+define_module(LIBRARY pygdal-drivers=${MODULE_gdal-drivers_VERSION}
+  DEPENDS
+  gdal-drivers=${MODULE_gdal-drivers_VERSION}
+  imgproc>=1.29 # needs numpy support
+  geo>=1.30 # needs non-reordered channel reading
+  NumPy OpenCV
+  Boost_THREAD Boost_SYSTEM Boost_PYTHON PYTHONLIBS)
+
+set(pygdal-drivers_SOURCES
+  gdaldriversmodule.hpp
+  gdaldriversmodule.cpp
+  )
+
+add_library(pygdal-drivers STATIC ${pygdal-drivers_SOURCES})
+buildsys_library(pygdal-drivers)
+buildsys_target_compile_definitions(pygdal-drivers ${MODULE_DEFINITIONS})
+target_link_libraries(pygdal-drivers ${MODULE_LIBRARIES})

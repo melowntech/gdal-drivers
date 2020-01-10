@@ -154,9 +154,15 @@ BOOST_PYTHON_MODULE(melown_gdaldrivers)
         auto Config = class_<py::BlendingDataset::Config>
             ("Config", init<const py::BlendingDataset::Config&>())
             .def(init<>())
-            .def_readwrite("srs", &py::BlendingDataset::Config::srs)
             .def_readwrite("extents", &py::BlendingDataset::Config::extents)
             .def_readwrite("overlap", &py::BlendingDataset::Config::overlap)
+            .add_property("srs"
+                          , bp::make_getter
+                          (&py::BlendingDataset::Config::srs
+                           , bp::return_value_policy<bp::return_by_value>())
+                          , bp::make_setter
+                          (&py::BlendingDataset::Config::srs
+                           , bp::return_value_policy<bp::return_by_value>()))
             .add_property("resolution"
                           , bp::make_getter
                           (&py::BlendingDataset::Config::resolution

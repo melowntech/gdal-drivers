@@ -74,7 +74,7 @@ public:
             }
         };
 
-        geo::SrsDefinition srs;
+        boost::optional<geo::SrsDefinition> srs;
         math::Extents2 extents;
         double overlap = 0;
         Dataset::list datasets;
@@ -91,12 +91,15 @@ public:
     static std::unique_ptr<BlendingDataset>
     create(const Config &config);
 
-    BlendingDataset(const Config &config);
+    std::unique_ptr<BlendingDataset>
+    create(const std::string &config);
+
 
     typedef std::unique_ptr< ::GDALDataset> Dataset;
     typedef std::vector<Dataset> Datasets;
 
 private:
+    BlendingDataset(const Config &config);
 
     class RasterBand;
     friend class RasterBand;

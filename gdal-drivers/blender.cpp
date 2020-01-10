@@ -55,13 +55,16 @@ void writeConfig(const fs::path &file, const BlendingDataset::Config &config)
     f.open(file.string(), std::ios_base::out | std::ios_base::trunc);
 
     f << "[blender]"
-      << "\nsrs = " << config.srs
       << "\nextents = " << config.extents
       << "\noverlap = " << config.overlap
         ;
 
+    if (config.srs) {
+        f << "\nsrs = " << config.srs.value();
+    }
+
     if (config.resolution) {
-        f  << "\nresolution = " << config.resolution.value();
+        f << "\nresolution = " << config.resolution.value();
     }
 
     f << "\n\n";
@@ -130,7 +133,7 @@ void checkCompatibility(const fs::path &refPath, ::GDALDataset *ref
 {
     // orthogonality
     if (!orthogonal(ds)) {
-        LOGTHROW( err2, std::runtime_error )
+        LOGTHROW(err2, std::runtime_error)
             << "Non-orthogonal GDAL dataset at " << dsPath
             << " cannot be georeferenced by extents.";
     }
@@ -139,7 +142,7 @@ void checkCompatibility(const fs::path &refPath, ::GDALDataset *ref
     const auto rRef(getResolution(ref));
     const auto rDs(getResolution(ds));
     if (!almostSame(rRef, rDs)) {
-        LOGTHROW( err2, std::runtime_error )
+        LOGTHROW(err2, std::runtime_error)
             << "GDAL dataset at " << dsPath << " has different resolution "
             << "(" << rDs
             << ") than reference raster dataset at " << refPath
@@ -148,7 +151,7 @@ void checkCompatibility(const fs::path &refPath, ::GDALDataset *ref
 
     // band compatibility
     if (ref->GetRasterCount() != ds->GetRasterCount()) {
-        LOGTHROW( err2, std::runtime_error )
+        LOGTHROW(err2, std::runtime_error)
             << "GDAL dataset at " << dsPath << " has different number "
             << "of raster bands (" << ds->GetRasterCount()
             << ") than reference raster dataset at " << refPath
@@ -233,7 +236,6 @@ private:
 
 BlendingDataset::BlendingDataset(const Config &config)
     : config_(config)
-    , srs_(config.srs.as(geo::SrsDefinition::Type::wkt).srs)
 {
     // open all datasets
     ::GDALDataset *main{};
@@ -246,7 +248,7 @@ BlendingDataset::BlendingDataset(const Config &config)
              (::GDALOpen(ds.path.c_str(), GA_ReadOnly)));
 
         if (!dset) {
-            LOGTHROW( err2, std::runtime_error )
+            LOGTHROW(err2, std::runtime_error)
                 << "Failed to open dataset " << ds.path << ".";
         }
 
@@ -267,6 +269,13 @@ BlendingDataset::BlendingDataset(const Config &config)
 
     math::Point2 resolution;
     math::Point2 origin;
+
+    // use provided srs or main dataset one
+    if (config.srs) {
+        srs_ = config.srs->as(geo::SrsDefinition::Type::wkt).srs;
+    } else {
+        srs_ = main->GetProjectionRef();
+    }
 
     {
         // align extents with dataset
@@ -564,23 +573,20 @@ CPLErr BlendingDataset::RasterBand::IReadBlock(int nBlockXOff, int nBlockYOff
     return CE_None;
 }
 
-/** Loads config from file. Used path only if non-null. If path is non-null then
- *  it is a hard error to fail to load from it.
- */
-bool configFromFile(BlendingDataset::Config &cfg, GDALOpenInfo *openInfo
-                    , const char *path = nullptr)
+bool loadConfig(BlendingDataset::Config &cfg, std::istream &is
+                , bool probe = false)
 {
     using Config = BlendingDataset::Config;
 
     po::options_description config("blending GDAL driver");
     po::variables_map vm;
     config.add_options()
-        ("blender.srs", po::value(&cfg.srs)->required()
-         , "SRS definition. Use [WKT], +proj or EPSG:num.")
         ("blender.extents", po::value(&cfg.extents)->required()
          , "Geo extents of dataset (ulx,uly:urx,ury).")
         ("blender.overlap", po::value(&cfg.overlap)->required()
          , "Blending dataset overlap.")
+        ("blender.srs", po::value<geo::SrsDefinition>()
+         , "SRS definition. Use [WKT], +proj or EPSG:num.")
         ("blender.resolution", po::value<math::Size2f>()
          , "Resolution of dataset. Defaults to first dataset resolution.")
         ;
@@ -599,32 +605,20 @@ bool configFromFile(BlendingDataset::Config &cfg, GDALOpenInfo *openInfo
     // try to parse file -> cannot parse -> probably not a blending dataset file
     // format
     try {
-        std::ifstream f;
-        f.exceptions(std::ifstream::failbit | std::ifstream::badbit);
-        f.open(path ? path : openInfo->pszFilename);
-        f.exceptions(std::ifstream::badbit);
-        parsed = (po::parse_config_file(f, config));
+        parsed = (po::parse_config_file(is, config));
         if (parsed.options.empty()) {
             // structure valid but nothing read -> not a blend file
-            if (path) {
+            if (!probe) {
                 CPLError(CE_Failure, CPLE_IllegalArg
                          , "Not a blending dataset.\n");
             }
             return false;
         }
     } catch (...) {
-        if (path) {
+        if (!probe) {
             CPLError(CE_Failure, CPLE_IllegalArg
                      , "Not a blending dataset.\n");
         }
-        return false;
-    }
-
-    // no updates
-    if (openInfo->eAccess == GA_Update) {
-        CPLError(CE_Failure, CPLE_NotSupported,
-                 "The Blending driver does not support update "
-                 "access to existing datasets.\n");
         return false;
     }
 
@@ -635,6 +629,10 @@ bool configFromFile(BlendingDataset::Config &cfg, GDALOpenInfo *openInfo
 
         if (vm.count("blender.resolution")) {
             cfg.resolution = vm["blender.resolution"].as<math::Size2f>();
+        }
+
+        if (vm.count("blender.srs")) {
+            cfg.srs = vm["blender.srs"].as<geo::SrsDefinition>();
         }
 
         // process bands
@@ -648,6 +646,39 @@ bool configFromFile(BlendingDataset::Config &cfg, GDALOpenInfo *openInfo
     } catch (const std::runtime_error & e) {
         CPLError(CE_Failure, CPLE_IllegalArg
                  , "BlendingDataset initialization failure (%s).\n", e.what());
+        return false;
+    }
+
+    return true;
+}
+
+/** Loads config from file. Used path only if non-null. If path is non-null then
+ *  it is a hard error to fail to load from it.
+ */
+bool configFromFile(BlendingDataset::Config &cfg, GDALOpenInfo *openInfo
+                    , const char *path = nullptr)
+{
+    try {
+        std::ifstream f;
+        f.exceptions(std::ifstream::failbit | std::ifstream::badbit);
+        f.open(path ? path : openInfo->pszFilename);
+        f.exceptions(std::ifstream::badbit);
+
+        // if path is not give -> just probe
+        if (!loadConfig(cfg, f, !path)) { return false; }
+    } catch (...) {
+        if (path) {
+            CPLError(CE_Failure, CPLE_IllegalArg
+                     , "Not a blending dataset.\n");
+        }
+        return false;
+    }
+
+    // no updates
+    if (openInfo->eAccess == GA_Update) {
+        CPLError(CE_Failure, CPLE_NotSupported,
+                 "The Blending driver does not support update "
+                 "access to existing datasets.\n");
         return false;
     }
 
@@ -720,6 +751,19 @@ std::unique_ptr<BlendingDataset>
 BlendingDataset::create(const Config &config)
 {
     return std::unique_ptr<BlendingDataset>(new BlendingDataset(config));
+}
+
+std::unique_ptr<BlendingDataset>
+BlendingDataset::create(const std::string &config)
+{
+    Config cfg;
+    std::istringstream is(config);
+    if (!loadConfig(cfg, is)) {
+        LOGTHROW(err2, std::runtime_error)
+            << "Unable to load BlendingDataset config from string.";
+    }
+
+    return std::unique_ptr<BlendingDataset> (new BlendingDataset(cfg));
 }
 
 } // namespace gdal_drivers

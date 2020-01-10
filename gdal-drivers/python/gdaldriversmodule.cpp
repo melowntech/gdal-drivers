@@ -41,6 +41,7 @@
 #include "dbglog/dbglog.hpp"
 
 #include "geo/geodataset.hpp"
+#include "geo/gdal.hpp"
 
 #include "imgproc/python/numpy.hpp"
 
@@ -119,15 +120,89 @@ bp::object openRasterio(const BlendingDataset::Config &config)
     return rasterio.attr("open")(os.str().c_str(), "r", "Blender");
 }
 
-bp::object readDataset(const BlendingDataset &ds)
+bp::object fetch(const geo::GeoDataset &dset, bool withMask = false)
 {
     /** Load all data from underlying dataset as-is and wrap in ND array
      *  Do not reorder channels.
      */
     geo::GeoDataset::ReadOptions options;
     options.channelsAsIs = true;
-    return imgproc::py::asNumpyArray(ds.dset.readData(-1, 0, options));
+    auto data(imgproc::py::asNumpyArray(dset.readData(-1, 0, options)));
+    if (!withMask) { return data; }
+
+    auto mask(imgproc::py::asNumpyArray(dset.fetchMask()));
+    return bp::make_tuple(data, mask);
 }
+
+inline geo::OptionalNodataValue asOptNodata(const geo::NodataValue &nodata)
+{
+    if (nodata) { return nodata; }
+    return boost::none;
+}
+
+bp::object readDataset(const BlendingDataset &ds, bool withMask)
+{
+    return fetch(ds.dset, withMask);
+}
+
+const char *readDoc(R"R(Returns whole content of dataset as a single ndarray.
+
+Dimensions are in C-style row-major order:
+    * multi-channel datasets: (row, columns, channel)
+    * single-channel datasets: (row, column)
+
+Data type and channel order is kept as in the original dataset.
+
+If withMask keyword argument is False (default) only content array is
+returned. If withMask keyword argument is set to True the tuple of (content,
+mask) is retuned instead where mask is Byte ndarray containing validity
+information.
+
+Arguments:
+    * withMask: validity mask is read as well (defaults to False)
+
+Returns:
+    ndarray or (ndarray, ndarray)
+)R");
+
+bp::object warpDataset(const BlendingDataset &ds
+                       , const math::Extents2 &extents
+                       , const boost::optional<geo::SrsDefinition> &srs
+                       , const boost::optional<math::Size2i> &size
+                       , const boost::optional< ::GDALDataType> &type
+                       , const boost::optional
+                       <geo::GeoDataset::Resampling> &resampling
+                       , const boost::optional<double> &nodata
+                       , bool withMask)
+{
+    auto warped(geo::GeoDataset::deriveInMemory
+                (ds.dset, srs ? srs.value() : ds.dset.srs()
+                 , size, extents, type, asOptNodata(nodata)));
+
+    ds.dset.warpInto(warped, resampling);
+    return fetch(warped, withMask);
+}
+
+const char *warpDoc(R"R(Returns whole content of warped dataset
+
+See read() method documentation for output properties.
+
+Arguments:
+    * math.Extents2 extents: extents of warped dataset
+    * geo.SrsDefinition srs: SRS of warped dataset (defaults to source SRS)
+    * math.Size2i size: pixel size of warped dataset (computed if not set)
+    * geo.GDALDataType type: output data type (defaults to source data type
+    * geo.GeoDataset.Resampling resampling: resampling method
+                                            (defaults to nerest neighbor)
+    * double nodata: override nodata value in output (defaults to
+                     source nodata value)
+    * withMask: see read() method documentation (default to False)
+
+Returns:
+    ndarray or (ndarray, ndarray)
+)R");
+
+template <typename T> boost::optional<T> opt() { return boost::optional<T>(); }
 
 } } // namespace gdal_drivers::py
 
@@ -135,16 +210,32 @@ BOOST_PYTHON_MODULE(melown_gdaldrivers)
 {
     using namespace bp;
     namespace py = gdal_drivers::py;
+    using py::opt;
 
     // blender
     auto BlendingDataset = class_<py::BlendingDataset, boost::noncopyable>
         ("BlendingDataset", init<const py::BlendingDataset::Config&>())
 
-        .def("read", &py::readDataset)
+        .def("read", &py::readDataset
+             , (bp::arg("withMask") = false)
+             , py::readDoc)
+        .def("warp", &py::warpDataset
+             , (bp::arg("extents")
+                , bp::arg("srs") = opt<geo::SrsDefinition>()
+                , bp::arg("size") = opt<math::Size2i>()
+                , bp::arg("type") = opt< ::GDALDataType>()
+                , bp::arg("resampling") = opt<geo::GeoDataset::Resampling>()
+                , bp::arg("nodata") = opt<double>()
+                , bp::arg("withMask") = false
+                )
+             , py::warpDoc)
 
-        .def("gdal", &py::openGdal)
+        .def("gdal", &py::openGdal
+             , "Opens blending dataset as an osgeo.gdal.Dataset.")
         .staticmethod("gdal")
-        .def("rasterio", &py::openRasterio)
+
+        .def("rasterio", &py::openRasterio
+             , "Opens blending dataset as a rasterio.DatasetReader.")
         .staticmethod("rasterio")
         ;
 

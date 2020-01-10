@@ -67,6 +67,10 @@ void writeConfig(const fs::path &file, const BlendingDataset::Config &config)
         f << "\nresolution = " << config.resolution.value();
     }
 
+    if (config.nodata) {
+        f << "\nnodata = " << config.nodata.value();
+    }
+
     f << "\n\n";
 
     for (const auto &ds : config.datasets) {
@@ -216,6 +220,11 @@ public:
         return bands_.front().band->GetColorInterpretation();
     }
 
+    virtual double GetNoDataValue(int *pbSuccess) {
+        if (pbSuccess) { *pbSuccess = bool(nodata_); }
+        return (nodata_ ? nodata_.value() : 0.0);
+    }
+
     struct Band {
         typedef std::vector<Band> list;
 
@@ -232,6 +241,7 @@ private:
      */
     BlendingDataset *dset_;
     Band::list bands_;
+    boost::optional<double> nodata_;
 };
 
 BlendingDataset::BlendingDataset(const Config &config)
@@ -309,7 +319,6 @@ BlendingDataset::BlendingDataset(const Config &config)
 
     // align extents
     const auto extents(align(config.extents));
-    // LOG(info4) << std::fixed << "extents: " << extents;
 
     // compute raster size and set geo transform
     {
@@ -368,13 +377,6 @@ BlendingDataset::BlendingDataset(const Config &config)
                                 , pixelExtents(des.extents, des.size
                                                , resolution)
                                 , pixelValid(ds.valid, resolution));
-
-        // const auto &ref(references.back());
-        // LOG(info4) << "ds: " << ds.path;
-        // LOG(info4) << "    size: " << des.size;
-        // LOG(info4) << std::fixed << "    extents: " << des.extents;
-        // LOG(info4) << std::fixed << "    px extents: " << ref.extents;
-        // LOG(info4) << std::fixed << "    px valid:  " << ref.valid;
     }
 
     // create bands
@@ -400,7 +402,7 @@ const char* BlendingDataset::GetProjectionRef()
 BlendingDataset::RasterBand
 ::RasterBand(BlendingDataset *dset, int bandIndex
              , const ImageReference::list &references)
-    : dset_(dset)
+    : dset_(dset), nodata_(dset_->config_.nodata)
 {
     bands_.reserve(dset->datasets_.size());
     auto ireferences(references.begin());
@@ -447,9 +449,6 @@ CPLErr BlendingDataset::RasterBand::IReadBlock(int nBlockXOff, int nBlockYOff
                    , nBlockYOff * nBlockYSize
                    , nBlockXSize, nBlockYSize);
 
-    // LOG(info4) << "reading block: [" << nBlockXOff << ", " << nBlockYOff
-    //            << "]: " << block;
-
     Image acc(nBlockXSize, nBlockYSize, 0.0);
     Image wacc(nBlockXSize, nBlockYSize, 0.0);
 
@@ -459,20 +458,12 @@ CPLErr BlendingDataset::RasterBand::IReadBlock(int nBlockXOff, int nBlockYOff
         auto roi(block & band.ref.extents);
         if (!roi.area()) { continue; }
 
-        // LOG(info4) << "src: " << band.ref.path;
-        // LOG(info4) << "extents: " << band.ref.extents;
-        // LOG(info4) << "block: " << block;
-        // LOG(info4) << "roi: " << roi;
-
         // localize
         const auto local(roi - band.ref.extents.tl());
-        // LOG(info4) << "local: " << local;
 
         // view into block
         const auto origin(roi.tl() - block.tl());
         const cv::Rect view(origin.x, origin.y, local.width, local.height);
-        // LOG(info4) << "origin: " << origin;
-        // LOG(info4) << "view: " << view;
 
         Image image(local.size());
 
@@ -518,10 +509,6 @@ CPLErr BlendingDataset::RasterBand::IReadBlock(int nBlockXOff, int nBlockYOff
             for (int j = 0; j < weights.rows; ++j, ++p.y) {
                 auto pp(p);
                 for (int i = 0; i < weights.cols; ++i, ++pp.x) {
-                    // LOG(info4) << "px: " << i << "," << j;
-                    // LOG(info4) << "valid: " << std::fixed
-                    //            << valid.tl() << ":" << valid.br();
-                    // LOG(info4) << "pp: " << std::fixed << pp;
                     // invalidate pixel ouside of valid area
                     if (!valid.contains(pp)) { weights(j, i) = 0.0; }
                 }
@@ -559,10 +546,19 @@ CPLErr BlendingDataset::RasterBand::IReadBlock(int nBlockXOff, int nBlockYOff
         Image(wacc, view) += weights;
     }
 
+    // invalid pixel mask (NB: do not use auto, operator returns template
+    // expression class)
+    cv::Mat invalidMask(wacc == 0.0);
+
     // set weight for invaid pixels to 1 to not divide by zero
-    wacc.setTo(1.0, (wacc == 0.0));
+    wacc.setTo(1.0, invalidMask);
     // apply weights total to accumulated image
     acc /= wacc;
+
+    // apply no data if present
+    if (nodata_) {
+        acc.setTo(nodata_.value(), invalidMask);
+    }
 
     {
         // copy data into output image
@@ -589,6 +585,9 @@ bool loadConfig(BlendingDataset::Config &cfg, std::istream &is
          , "SRS definition. Use [WKT], +proj or EPSG:num.")
         ("blender.resolution", po::value<math::Size2f>()
          , "Resolution of dataset. Defaults to first dataset resolution.")
+        ("blender.nodata", po::value<double>()
+         , "Reported nodata value. If not set a per-dataset mask layer "
+         "is provided")
         ;
 
     using utility::multi_value;
@@ -627,12 +626,16 @@ bool loadConfig(BlendingDataset::Config &cfg, std::istream &is
         po::store(parsed, vm);
         po::notify(vm);
 
+        if (vm.count("blender.srs")) {
+            cfg.srs = vm["blender.srs"].as<geo::SrsDefinition>();
+        }
+
         if (vm.count("blender.resolution")) {
             cfg.resolution = vm["blender.resolution"].as<math::Size2f>();
         }
 
-        if (vm.count("blender.srs")) {
-            cfg.srs = vm["blender.srs"].as<geo::SrsDefinition>();
+        if (vm.count("blender.nodata")) {
+            cfg.nodata = vm["blender.nodata"].as<double>();
         }
 
         // process bands

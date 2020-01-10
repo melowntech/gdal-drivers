@@ -79,6 +79,7 @@ public:
         double overlap = 0;
         Dataset::list datasets;
         boost::optional<math::Size2f> resolution;
+        boost::optional<double> nodata;
     };
 
     /** Creates new blending dataset and returns open interface.

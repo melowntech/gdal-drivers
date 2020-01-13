@@ -41,6 +41,7 @@
 #include "utility/streams.hpp"
 
 #include "geo/gdal.hpp"
+#include "geo/cv.hpp"
 
 #include "blender.hpp"
 
@@ -208,10 +209,77 @@ Descriptor::Descriptor(::GDALDataset *ds)
     extents.ur(1) = std::max({ll(1), lr(1), ul(1), ur(1)});
 }
 
+using Image = cv::Mat_<double>;
+using Mask = cv::Mat_<std::uint8_t>;
+
+struct Locator {
+    cv::Rect roi;
+    cv::Rect local;
+    cv::Rect view;
+
+    Locator(const cv::Rect &block, const cv::Rect &extents)
+        : roi(block & extents)
+        , local(roi - extents.tl())
+        , view(roi.x - block.x, roi.y - block.y, local.width, local.height)
+    {}
+
+    operator bool() const { return roi.area(); }
+};
+
+template <typename T>
+CPLErr loadImage(cv::Mat_<T> &image, const Locator &l, ::GDALRasterBand &band)
+{
+    image.create(l.local.size());
+    return band.RasterIO(GF_Read
+                         , l.local.x, l.local.y
+                         , l.local.width, l.local.height
+                         , image.data
+                         , l.local.width, l.local.height
+                         , geo::cv2gdal(image.depth())
+                         , image.elemSize(), image.step
+                         , nullptr);
+}
+
+/** No normalization by default
+ */
+template <typename T> void normalizeMask(cv::Mat_<T>&) {}
+
+inline void normalizeMask(Image &image) {
+    for (auto &px : image) { if (px) { px = 1.0; } }
+}
+
+template <typename T>
+void fullMask(cv::Mat_<T> &mask, const cv::Size &size) {
+    mask = cv::Mat_<T>(size, T(255));
+}
+
+inline void fullMask(Image &mask, const cv::Size &size) {
+    mask = Image(size, Image::value_type(1.0));
+}
+
+template <typename T>
+CPLErr loadMask(cv::Mat_<T> &mask, const Locator &l, ::GDALRasterBand &band)
+{
+    if (band.GetMaskFlags() & GMF_ALL_VALID) {
+        // all valid
+        fullMask(mask, l.local.size());
+        return CE_None;
+    }
+
+    // not all pixels valid, load mask from mask band
+    const auto err = loadImage(mask, l, *band.GetMaskBand());
+    if (err != CE_None) { return err; }
+
+    normalizeMask(mask);
+    return CE_None;
+}
+
 } // namespace
 
-/**
- * @brief BorderedAreaRasterBand
+/** BorderedAreaRasterBand
+ *
+ * TODO: add suppot for per-dataset mask and ditch mask altogether if there is
+ * no input mask at all.
  */
 class BlendingDataset::RasterBand : public ::GDALRasterBand {
 public:
@@ -243,6 +311,22 @@ public:
     };
 
 private:
+    CPLErr maskIReadBlock(int nBlockXOff, int nBlockYOff, void *image);
+
+    class MaskBand : public ::GDALRasterBand {
+    public:
+        MaskBand(RasterBand *owner);
+
+        virtual CPLErr IReadBlock(int nBlockXOff, int nBlockYOff
+                                  , void *image)
+        {
+            return owner_->maskIReadBlock(nBlockXOff, nBlockYOff, image);
+        }
+
+    private:
+        RasterBand *owner_;
+    };
+
     /** List of source bands.
      */
     BlendingDataset *dset_;
@@ -416,95 +500,61 @@ BlendingDataset::RasterBand
         bands_.emplace_back(ds->GetRasterBand(bandIndex), *ireferences++);
     }
 
+    nBand = bandIndex;
     nRasterXSize = dset->nRasterXSize;
-    nRasterYSize = dset->nRasterXSize;
+    nRasterYSize = dset->nRasterYSize;
 
     nBlockXSize = 256;
     nBlockYSize = 256;
     eDataType = (dset->config_.type
                  ? *dset->config_.type
                  : bands_.front().band->GetRasterDataType());
-}
 
-namespace {
-
-int gdal2cv(GDALDataType type)
-{
-    switch (type) {
-    case GDT_Byte: return CV_8UC1;
-    case GDT_UInt16: return CV_16UC1;
-    case GDT_Int16: return CV_16SC1;
-    case GDT_UInt32: return CV_32SC1;
-    case GDT_Int32: return CV_32SC1;
-    case GDT_Float32: return CV_32FC1;
-    case GDT_Float64: return CV_64FC1;
-
-    default:
-        LOGTHROW(err2, std::logic_error)
-            << "Unsupported datatype " << type << " in raster.";
+    if (!nodata_) {
+        poMask = new MaskBand(this);
+        bOwnMask = true;
     }
-    return 0; // never reached
 }
 
-} // namespace
-
-CPLErr BlendingDataset::RasterBand::IReadBlock(int nBlockXOff, int nBlockYOff
-                                               , void *rawImage)
+BlendingDataset::RasterBand::MaskBand::MaskBand(RasterBand *owner)
+    : owner_(owner)
 {
-    using Image = cv::Mat_<double>;
+    nRasterXSize = owner_->nRasterXSize;
+    nRasterYSize = owner_->nRasterYSize;
 
+    nBlockXSize = 256;
+    nBlockYSize = 256;
+    eDataType = GDT_Byte;
+}
+
+CPLErr BlendingDataset::RasterBand
+::IReadBlock(int nBlockXOff, int nBlockYOff, void *rawImage)
+{
     cv::Rect block(nBlockXOff * nBlockXSize
                    , nBlockYOff * nBlockYSize
                    , nBlockXSize, nBlockYSize);
 
-    Image acc(nBlockXSize, nBlockYSize, 0.0);
-    Image wacc(nBlockXSize, nBlockYSize, 0.0);
+    Image acc(nBlockYSize, nBlockXSize, 0.0);
+    Image wacc(nBlockYSize, nBlockXSize, 0.0);
 
     // for each band
     for (auto &band : bands_) {
         // compute source block
-        auto roi(block & band.ref.extents);
-        if (!roi.area()) { continue; }
-
-        // localize
-        const auto local(roi - band.ref.extents.tl());
-
-        // view into block
-        const auto origin(roi.tl() - block.tl());
-        const cv::Rect view(origin.x, origin.y, local.width, local.height);
-
-        Image image(local.size());
+        Locator l(block, band.ref.extents);
+        if (!l) { continue; }
 
         // read block via generic RasterIO
-        const auto err
-            (band.band->RasterIO(GF_Read
-                                 , local.x, local.y
-                                 , local.width, local.height
-                                 , image.data
-                                 , local.width, local.height
-                                 , GDT_Float64
-                                 , image.elemSize(), image.step
-                                 , nullptr));
-
-        if (err != CE_None) { return err; }
+        Image image;
+        {
+            const auto err(loadImage(image, l, *band.band));
+            if (err != CE_None) { return err; }
+        }
 
         // get weights
-        Image weights(local.size(), 1.0);
-        if (!(band.band->GetMaskFlags() & GMF_ALL_VALID)) {
-            // not all pixels valid, load weights from weights band
-            auto mb(band.band->GetMaskBand());
-
-            const auto err
-                (mb->RasterIO(GF_Read
-                              , local.x, local.y
-                              , local.width, local.height
-                              , weights.data
-                              , local.width, local.height
-                              , GDT_Float64
-                              , weights.elemSize(), weights.step
-                              , nullptr));
+        Image weights;
+        {
+            const auto err(loadMask(weights, l, *band.band));
             if (err != CE_None) { return err; }
-            for (auto &px : weights) { if (px) { px = 1.0; } }
         }
 
         // compute weight for each pixel
@@ -513,7 +563,7 @@ CPLErr BlendingDataset::RasterBand::IReadBlock(int nBlockXOff, int nBlockYOff
         if (math::empty(overlap)) {
             // no overlap, use only pixels inside the valid image area
             const auto &valid(band.ref.valid);
-            cv::Point2f p(roi.x + 0.5, roi.y + 0.5);
+            cv::Point2f p(l.roi.x + 0.5, l.roi.y + 0.5);
             for (int j = 0; j < weights.rows; ++j, ++p.y) {
                 auto pp(p);
                 for (int i = 0; i < weights.cols; ++i, ++pp.x) {
@@ -531,14 +581,14 @@ CPLErr BlendingDataset::RasterBand::IReadBlock(int nBlockXOff, int nBlockYOff
 
             // base kernel at image's upper-left corner
             cv::Rect2d
-                k(roi.x - overlap.width + 0.5
-                  , roi.y - overlap.height + 0.5
+                k(l.roi.x - overlap.width + 0.5
+                  , l.roi.y - overlap.height + 0.5
                   , overlap.width * 2, overlap.height * 2);
 
             for (int j = 0; j < weights.rows; ++j, ++k.y) {
                 auto kernel(k);
                 for (int i = 0; i < weights.cols; ++i, ++kernel.x) {
-                    // are of kernel clipped by "valid" extents
+                    // area of the kernel clipped by the "valid" extents
                     const auto area((valid & kernel).area());
                     // apply weight
                     weights(j, i) *= (area / kernelArea);
@@ -548,10 +598,10 @@ CPLErr BlendingDataset::RasterBand::IReadBlock(int nBlockXOff, int nBlockYOff
 
         // add weighted data to accumulator
         cv::multiply(image, weights, image);
-        Image(acc, view) += image;
+        Image(acc, l.view) += image;
 
         // update weight total
-        Image(wacc, view) += weights;
+        Image(wacc, l.view) += weights;
     }
 
     // invalid pixel mask (NB: do not use auto, operator returns template
@@ -569,10 +619,87 @@ CPLErr BlendingDataset::RasterBand::IReadBlock(int nBlockXOff, int nBlockYOff
     }
 
     {
-        // copy data into output image
-        const auto type(gdal2cv(bands_.front().band->GetRasterDataType()));
+        // copy data into the output image
+        const auto type(geo::gdal2cv(eDataType));
         cv::Mat out(nBlockYSize, nBlockXSize, type, rawImage);
         acc.convertTo(out, type);
+    }
+    return CE_None;
+}
+
+CPLErr BlendingDataset::RasterBand
+::maskIReadBlock(int nBlockXOff, int nBlockYOff, void *rawImage)
+{
+    cv::Rect block(nBlockXOff * nBlockXSize
+                   , nBlockYOff * nBlockYSize
+                   , nBlockXSize, nBlockYSize);
+
+    Mask acc(nBlockYSize, nBlockXSize, std::uint8_t(0));
+
+    // for each band
+    for (auto &band : bands_) {
+        // compute source block
+        Locator l(block, band.ref.extents);
+        if (!l) { continue; }
+
+        // read block via generic RasterIO
+        Image image;
+        {
+            const auto err(loadImage(image, l, *band.band));
+            if (err != CE_None) { return err; }
+        }
+
+        // get weights
+        Mask mask;
+        {
+            const auto err(loadMask(mask, l, *band.band));
+            if (err != CE_None) { return err; }
+        }
+
+        // determine validty status of every pixel
+        const auto overlap(dset_->overlap_);
+
+        if (math::empty(overlap)) {
+            // no overlap, use only pixels inside the valid image area
+            const auto &valid(band.ref.valid);
+            cv::Point2f p(l.roi.x + 0.5, l.roi.y + 0.5);
+            for (int j = 0; j < mask.rows; ++j, ++p.y) {
+                auto pp(p);
+                for (int i = 0; i < mask.cols; ++i, ++pp.x) {
+                    // invalidate pixel outside of the valid area
+                    if (!valid.contains(pp)) { mask(j, i) = 0; }
+                }
+            }
+        } else {
+            // apply overlap, take into acount pixels outside of the valid image
+            // area
+            const auto &valid(band.ref.valid);
+
+            // base kernel at image's upper-left corner
+            cv::Rect2d
+                k(l.roi.x - overlap.width + 0.5
+                  , l.roi.y - overlap.height + 0.5
+                  , overlap.width * 2, overlap.height * 2);
+
+            for (int j = 0; j < mask.rows; ++j, ++k.y) {
+                auto kernel(k);
+                for (int i = 0; i < mask.cols; ++i, ++kernel.x) {
+                    // area of the kernel clipped by the "valid" extents
+                    const auto area((valid & kernel).area());
+                    // mask pixel if outside
+                    if (!area) { mask(j, i) = 0; }
+                }
+            }
+        }
+
+        // set valid pixels from mask
+        Mask(acc, l.view).setTo(255, mask);
+    }
+
+    {
+        // copy mask into the output image
+        cv::Mat out(nBlockYSize, nBlockXSize, CV_8U, rawImage);
+        acc.copyTo(out);
     }
     return CE_None;
 }
@@ -642,7 +769,7 @@ bool loadConfig(BlendingDataset::Config &cfg, std::istream &is
         }
 
         if (vm.count("blender.type")) {
-            cfg.srs = vm["blender.type"].as< ::GDALDataType>();
+            cfg.type = vm["blender.type"].as< ::GDALDataType>();
         }
 
         if (vm.count("blender.resolution")) {

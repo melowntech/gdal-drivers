@@ -42,6 +42,7 @@
 
 #include "geo/geodataset.hpp"
 #include "geo/gdal.hpp"
+#include "geo/cv.hpp"
 
 #include "imgproc/python/numpy.hpp"
 

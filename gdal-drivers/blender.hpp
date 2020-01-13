@@ -75,6 +75,7 @@ public:
         };
 
         boost::optional<geo::SrsDefinition> srs;
+        boost::optional< ::GDALDataType> type;
         math::Extents2 extents;
         double overlap = 0;
         Dataset::list datasets;

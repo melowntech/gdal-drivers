@@ -120,14 +120,21 @@ bp::object openRasterio(const BlendingDataset::Config &config)
     return rasterio.attr("open")(os.str().c_str(), "r", "Blender");
 }
 
-bp::object fetch(const geo::GeoDataset &dset, bool withMask = false)
+bp::object fetch(const geo::GeoDataset &dset
+                 , const boost::optional< ::GDALDataType> &type
+                 , bool withMask = false)
 {
     /** Load all data from underlying dataset as-is and wrap in ND array
      *  Do not reorder channels.
      */
     geo::GeoDataset::ReadOptions options;
     options.channelsAsIs = true;
-    auto data(imgproc::py::asNumpyArray(dset.readData(-1, 0, options)));
+
+    /** Use native dataset's data type or requested one.
+     */
+    const int depth(type ? geo::gdal2cv(*type) : -1);
+
+    auto data(imgproc::py::asNumpyArray(dset.readData(depth, 0, options)));
     if (!withMask) { return data; }
 
     auto mask(imgproc::py::asNumpyArray(dset.fetchMask()));
@@ -140,9 +147,11 @@ inline geo::OptionalNodataValue asOptNodata(const geo::NodataValue &nodata)
     return boost::none;
 }
 
-bp::object readDataset(const BlendingDataset &ds, bool withMask)
+bp::object readDataset(const BlendingDataset &ds
+                       , const boost::optional< ::GDALDataType> &type
+                       , bool withMask)
 {
-    return fetch(ds.dset, withMask);
+    return fetch(ds.dset, type, withMask);
 }
 
 const char *readDoc(R"R(Returns whole content of dataset as a single ndarray.
@@ -151,7 +160,8 @@ Dimensions are in C-style row-major order:
     * multi-channel datasets: (row, columns, channel)
     * single-channel datasets: (row, column)
 
-Data type and channel order is kept as in the original dataset.
+Channel order is kept as in the original dataset. If data type is not specified
+the the native datatype is used.
 
 If withMask keyword argument is False (default) only content array is
 returned. If withMask keyword argument is set to True the tuple of (content,
@@ -159,6 +169,7 @@ mask) is retuned instead where mask is Byte ndarray containing validity
 information.
 
 Arguments:
+    * geo.GDALDataType type: output data type (defaults to source data type
     * withMask: validity mask is read as well (defaults to False)
 
 Returns:
@@ -169,28 +180,39 @@ bp::object warpDataset(const BlendingDataset &ds
                        , const math::Extents2 &extents
                        , const boost::optional<geo::SrsDefinition> &srs
                        , const boost::optional<math::Size2i> &size
+                       , const boost::optional< ::GDALDataType> &warpType
                        , const boost::optional< ::GDALDataType> &type
                        , const boost::optional
                        <geo::GeoDataset::Resampling> &resampling
                        , const boost::optional<double> &nodata
                        , bool withMask)
 {
+    // warp and output types
+    const auto wt(warpType ? warpType : type);
+    boost::optional< ::GDALDataType> ot;
+    if (warpType != type) { ot = type; }
+
     auto warped(geo::GeoDataset::deriveInMemory
                 (ds.dset, srs ? srs.value() : ds.dset.srs()
-                 , size, extents, type, asOptNodata(nodata)));
+                 , size, extents, wt, asOptNodata(nodata)));
 
     ds.dset.warpInto(warped, resampling);
-    return fetch(warped, withMask);
+    return fetch(warped, ot, withMask);
 }
 
 const char *warpDoc(R"R(Returns whole content of warped dataset
 
 See read() method documentation for output properties.
 
+Data type of the warp result is either warpType or type or dataset's type. Type
+of the read result is the same as warp result unless type and warp types are
+different.
+
 Arguments:
     * math.Extents2 extents: extents of warped dataset
     * geo.SrsDefinition srs: SRS of warped dataset (defaults to source SRS)
     * math.Size2i size: pixel size of warped dataset (computed if not set)
+    * geo.GDALDataType warpType: warp data type (if different from output)
     * geo.GDALDataType type: output data type (defaults to source data type
     * geo.GeoDataset.Resampling resampling: resampling method
                                             (defaults to nerest neighbor)
@@ -217,12 +239,15 @@ BOOST_PYTHON_MODULE(melown_gdaldrivers)
         ("BlendingDataset", init<const py::BlendingDataset::Config&>())
 
         .def("read", &py::readDataset
-             , (bp::arg("withMask") = false)
+             , (bp::arg("type") = opt< ::GDALDataType>()
+                , bp::arg("withMask") = false
+             )
              , py::readDoc)
         .def("warp", &py::warpDataset
              , (bp::arg("extents")
                 , bp::arg("srs") = opt<geo::SrsDefinition>()
                 , bp::arg("size") = opt<math::Size2i>()
+                , bp::arg("warpType") = opt< ::GDALDataType>()
                 , bp::arg("type") = opt< ::GDALDataType>()
                 , bp::arg("resampling") = opt<geo::GeoDataset::Resampling>()
                 , bp::arg("nodata") = opt<double>()

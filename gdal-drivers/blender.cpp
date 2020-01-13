@@ -40,6 +40,8 @@
 #include "utility/multivalue.hpp"
 #include "utility/streams.hpp"
 
+#include "geo/gdal.hpp"
+
 #include "blender.hpp"
 
 namespace po = boost::program_options;
@@ -61,6 +63,10 @@ void writeConfig(const fs::path &file, const BlendingDataset::Config &config)
 
     if (config.srs) {
         f << "\nsrs = " << config.srs.value();
+    }
+
+    if (config.type) {
+        f << "\ntype = " << config.type.value();
     }
 
     if (config.resolution) {
@@ -415,7 +421,9 @@ BlendingDataset::RasterBand
 
     nBlockXSize = 256;
     nBlockYSize = 256;
-    eDataType = bands_.front().band->GetRasterDataType();
+    eDataType = (dset->config_.type
+                 ? *dset->config_.type
+                 : bands_.front().band->GetRasterDataType());
 }
 
 namespace {
@@ -583,6 +591,9 @@ bool loadConfig(BlendingDataset::Config &cfg, std::istream &is
          , "Blending dataset overlap.")
         ("blender.srs", po::value<geo::SrsDefinition>()
          , "SRS definition. Use [WKT], +proj or EPSG:num.")
+        ("blender.type", po::value< ::GDALDataType>()
+         , "Data type (Byte, Int, UInt, etc. Defaultsto first dataset "
+         "data type.")
         ("blender.resolution", po::value<math::Size2f>()
          , "Resolution of dataset. Defaults to first dataset resolution.")
         ("blender.nodata", po::value<double>()
@@ -628,6 +639,10 @@ bool loadConfig(BlendingDataset::Config &cfg, std::istream &is
 
         if (vm.count("blender.srs")) {
             cfg.srs = vm["blender.srs"].as<geo::SrsDefinition>();
+        }
+
+        if (vm.count("blender.type")) {
+            cfg.srs = vm["blender.type"].as< ::GDALDataType>();
         }
 
         if (vm.count("blender.resolution")) {

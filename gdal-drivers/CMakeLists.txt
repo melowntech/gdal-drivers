@@ -2,6 +2,7 @@
 set(gdal-drivers_VERSION 1.15)
 
 set(gdal-drivers_DEPENDS)
+set(gdal-drivers_DEFINITIONS)
 
 set(gdal-drivers_SOURCES
   register.hpp register.cpp
@@ -9,8 +10,6 @@ set(gdal-drivers_SOURCES
   mask.hpp mask.cpp
   solid.hpp solid.cpp
   blender.hpp blender.cpp
-
-  mvt.hpp mvt.cpp
 
   detail/mbtiles.hpp
   detail/extents.hpp
@@ -29,16 +28,26 @@ else()
     detail/mbtiles.nosqlite.cpp)
 endif()
 
+if(PROTOBUF_FOUND)
+  message(STATUS "gdal-drivers: compiling in protobuf support")
+  list(APPEND gdal-drivers_SOURCES
+    mvt.hpp mvt.cpp)
+
+  list(APPEND gdal-drivers_DEPENDS PROTOBUF)
+  list(APPEND gdal-drivers_DEFINITIONS GDAL_DRIVERS_HAS_PROTOBUF)
+  protobuf_generate_cpp(gdal-drivers_PROTO_SOURCES gdal-drivers_PROTO_HDRS
+    proto/vector_tile.proto)
+else()
+  message(STATUS "gdal-drivers: compiling without protobuf support")
+endif()
+
 define_module(LIBRARY gdal-drivers=${gdal-drivers_VERSION}
   DEPENDS
   ${gdal-drivers_DEPENDS}
   geo>=1.31 jsoncpp>=2.1
-  PROTOBUF
   Boost_PROGRAM_OPTIONS
+  DEFINITIONS ${gdal-drivers_DEFINITIONS}
   )
-
-protobuf_generate_cpp(gdal-drivers_PROTO_SOURCES gdal-drivers_PROTO_HDRS
-  proto/vector_tile.proto)
 
 # protobuf generator generates that triggers warning in recent gcc -> no
 # warnings

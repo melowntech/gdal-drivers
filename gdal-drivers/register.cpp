@@ -23,10 +23,14 @@
  * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
  * POSSIBILITY OF SUCH DAMAGE.
  */
+
 #include "./mask.hpp"
 #include "./solid.hpp"
 #include "./blender.hpp"
-#include "./mvt.hpp"
+
+#ifdef GDAL_DRIVERS_HAS_PROTOBUF
+#  include "./mvt.hpp"
+#endif
 
 namespace gdal_drivers {
 
@@ -36,7 +40,10 @@ void registerAll()
     GDALRegister_MaskDataset();
     GDALRegister_SolidDataset();
     GDALRegister_BlendingDataset();
+
+#ifdef GDAL_DRIVERS_HAS_PROTOBUF
     GDALRegister_MvtDataset();
+#endif
 }
 
 } // namespace gdal_drivers

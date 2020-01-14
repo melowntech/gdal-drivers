@@ -23,6 +23,7 @@
  * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
  * POSSIBILITY OF SUCH DAMAGE.
  */
+
 #include <cstring>
 
 #include <boost/iostreams/stream_buffer.hpp>
@@ -35,7 +36,8 @@
 
 #include "dbglog/dbglog.hpp"
 
-#include "./mbtiles.hpp"
+#include "vector_tile.pb.h"
+#include "mbtiles.hpp"
 
 namespace bio = boost::iostreams;
 

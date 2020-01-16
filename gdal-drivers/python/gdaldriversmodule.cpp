@@ -68,10 +68,7 @@ struct BlendingDataset {
     BlendingDataset(const Config &config)
         : dset(geo::GeoDataset::use
                (gdal_drivers::BlendingDataset::create(config)))
-    {
-        // make sure we have numpy
-        imgproc::py::importNumpy();
-    }
+    {}
 
     geo::GeoDataset dset;
 };

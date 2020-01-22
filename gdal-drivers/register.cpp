@@ -24,9 +24,9 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include "./mask.hpp"
-#include "./solid.hpp"
-#include "./blender.hpp"
+#include "mask.hpp"
+#include "solid.hpp"
+#include "blender.hpp"
 
 #ifdef GDAL_DRIVERS_HAS_PROTOBUF
 #  include "./mvt.hpp"

@@ -25,7 +25,7 @@
  */
 #include <cpl_error.h>
 
-#include "./mbtiles.hpp"
+#include "mbtiles.hpp"
 
 namespace gdal_drivers { namespace detail {
 

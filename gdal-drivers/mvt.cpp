@@ -48,10 +48,10 @@
 #include "geo/gdal.hpp"
 #include "geo/po.hpp"
 
-#include "./mvt.hpp"
+#include "mvt.hpp"
 
-#include "./mvt.hpp"
-#include "./detail/mbtiles.hpp"
+#include "mvt.hpp"
+#include "detail/mbtiles.hpp"
 
 namespace po = boost::program_options;
 namespace ba = boost::algorithm;

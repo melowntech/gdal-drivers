@@ -45,7 +45,7 @@
 #include "imgproc/rastermask/quadtree.hpp"
 #include "imgproc/fillrect.hpp"
 
-#include "./mask.hpp"
+#include "mask.hpp"
 
 namespace fs = boost::filesystem;
 namespace bin = utility::binaryio;

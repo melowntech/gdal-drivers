@@ -424,8 +424,8 @@ BlendingDataset::BlendingDataset(const Config &config)
         geoTransform_[4] = 0.0;
         geoTransform_[5] = -resolution(1);
 
-        overlap_.width = config.overlap * resolution(0);
-        overlap_.height = config.overlap * resolution(1);
+        overlap_.width = std::round(config.overlap / resolution(0));
+        overlap_.height = std::round(config.overlap / resolution(1));
     }
 
     const auto &point2pixel([&](const math::Point2 &p

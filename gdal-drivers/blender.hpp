@@ -47,6 +47,12 @@ namespace gdal_drivers {
  * @brief GttDataset
  */
 
+namespace detail {
+
+void closeGdalDataset(::GDALDataset *ds);
+
+} // namespace detail
+
 class BlendingDataset : public ::GDALDataset {
 public:
     static ::GDALDataset* Open(GDALOpenInfo *openInfo);
@@ -55,6 +61,7 @@ public:
 
     virtual CPLErr GetGeoTransform(double *padfTransform);
     virtual const char *GetProjectionRef();
+    virtual int CloseDependentDatasets();
 
     class Config {
     public:
@@ -97,8 +104,8 @@ public:
     std::unique_ptr<BlendingDataset>
     create(const std::string &config);
 
-
-    typedef std::unique_ptr< ::GDALDataset> Dataset;
+    typedef std::unique_ptr< ::GDALDataset
+                             , decltype(&detail::closeGdalDataset)> Dataset;
     typedef std::vector<Dataset> Datasets;
 
 private:

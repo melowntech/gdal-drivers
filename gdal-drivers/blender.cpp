@@ -51,6 +51,12 @@ namespace fs = boost::filesystem;
 
 namespace gdal_drivers {
 
+namespace detail {
+
+void closeGdalDataset(::GDALDataset *ds) { ::GDALClose(ds); }
+
+} // namespace detail
+
 void writeConfig(std::ostream &f, const BlendingDataset::Config &config)
 {
     f << "[blender]"
@@ -303,6 +309,10 @@ public:
         return (nodata_ ? nodata_.value() : 0.0);
     }
 
+    virtual GDALColorTable* GetColorTable() {
+        return colorTable_.get();
+    }
+
     struct Band {
         typedef std::vector<Band> list;
 
@@ -333,9 +343,10 @@ private:
 
     /** List of source bands.
      */
-    BlendingDataset *dset_;
     Band::list bands_;
     boost::optional<double> nodata_;
+    std::unique_ptr< ::GDALColorTable> colorTable_;
+    math::Size2f overlap_;
 };
 
 BlendingDataset::BlendingDataset(const Config &config)
@@ -347,9 +358,10 @@ BlendingDataset::BlendingDataset(const Config &config)
     Descriptor::list descriptors;
 
     for (auto &ds : config.datasets) {
-        std::unique_ptr< ::GDALDataset> dset
+        Dataset dset
             (static_cast< ::GDALDataset*>
-             (::GDALOpen(ds.path.c_str(), GA_ReadOnly)));
+             (::GDALOpen(ds.path.c_str(), GA_ReadOnly))
+             , &detail::closeGdalDataset);
 
         if (!dset) {
             LOGTHROW(err2, std::runtime_error)
@@ -493,15 +505,30 @@ const char* BlendingDataset::GetProjectionRef()
     return srs_.c_str();
 }
 
+int BlendingDataset::CloseDependentDatasets()
+{
+    if (datasets_.empty()) { return FALSE; }
+    datasets_.clear();
+    return TRUE;
+}
+
 BlendingDataset::RasterBand
 ::RasterBand(BlendingDataset *dset, int bandIndex
              , const ImageReference::list &references)
-    : dset_(dset), nodata_(dset_->config_.nodata)
+    : nodata_(dset->config_.nodata)
+    , overlap_(dset->overlap_)
 {
     bands_.reserve(dset->datasets_.size());
     auto ireferences(references.begin());
     for (const auto &ds : dset->datasets_) {
         bands_.emplace_back(ds->GetRasterBand(bandIndex), *ireferences++);
+    }
+
+    // copy color table from first dataset (if any)
+    if (auto *colorTable = bands_.front().band->GetColorTable()) {
+        colorTable_.reset(colorTable->Clone());
+        // discrete data, disable overlap
+        overlap_ = {};
     }
 
     nBand = bandIndex;
@@ -562,9 +589,7 @@ CPLErr BlendingDataset::RasterBand
         }
 
         // compute weight for each pixel
-        const auto overlap(dset_->overlap_);
-
-        if (math::empty(overlap)) {
+        if (math::empty(overlap_)) {
             // no overlap, use only pixels inside the valid image area
             const auto &valid(band.ref.valid);
             cv::Point2f p(l.roi.x + 0.5, l.roi.y + 0.5);
@@ -581,13 +606,13 @@ CPLErr BlendingDataset::RasterBand
             const auto &valid(band.ref.valid);
 
             // full kernel area
-            const auto kernelArea(4 * math::area(overlap));
+            const auto kernelArea(4 * math::area(overlap_));
 
             // base kernel at image's upper-left corner
             cv::Rect2d
-                k(l.roi.x - overlap.width + 0.5
-                  , l.roi.y - overlap.height + 0.5
-                  , overlap.width * 2, overlap.height * 2);
+                k(l.roi.x - overlap_.width + 0.5
+                  , l.roi.y - overlap_.height + 0.5
+                  , overlap_.width * 2, overlap_.height * 2);
 
             for (int j = 0; j < weights.rows; ++j, ++k.y) {
                 auto kernel(k);
@@ -660,10 +685,9 @@ CPLErr BlendingDataset::RasterBand
             if (err != CE_None) { return err; }
         }
 
-        // determine validty status of every pixel
-        const auto overlap(dset_->overlap_);
+        // determine validity status of every pixel
 
-        if (math::empty(overlap)) {
+        if (math::empty(overlap_)) {
             // no overlap, use only pixels inside the valid image area
             const auto &valid(band.ref.valid);
             cv::Point2f p(l.roi.x + 0.5, l.roi.y + 0.5);
@@ -681,9 +705,9 @@ CPLErr BlendingDataset::RasterBand
 
             // base kernel at image's upper-left corner
             cv::Rect2d
-                k(l.roi.x - overlap.width + 0.5
-                  , l.roi.y - overlap.height + 0.5
-                  , overlap.width * 2, overlap.height * 2);
+                k(l.roi.x - overlap_.width + 0.5
+                  , l.roi.y - overlap_.height + 0.5
+                  , overlap_.width * 2, overlap_.height * 2);
 
             for (int j = 0; j < mask.rows; ++j, ++k.y) {
                 auto kernel(k);

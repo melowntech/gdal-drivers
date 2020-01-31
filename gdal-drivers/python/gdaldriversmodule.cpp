@@ -227,6 +227,7 @@ template <typename T> boost::optional<T> opt() { return boost::optional<T>(); }
 std::string Config_repr(const gdal_drivers::BlendingDataset::Config &config)
 {
     std::ostringstream os;
+    os << std::fixed;
     gdal_drivers::writeConfig(os, config);
     return os.str();
 }

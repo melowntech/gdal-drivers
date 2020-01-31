@@ -224,6 +224,13 @@ Returns:
 
 template <typename T> boost::optional<T> opt() { return boost::optional<T>(); }
 
+std::string Config_repr(const gdal_drivers::BlendingDataset::Config &config)
+{
+    std::ostringstream os;
+    gdal_drivers::writeConfig(os, config);
+    return os.str();
+}
+
 } } // namespace gdal_drivers::py
 
 BOOST_PYTHON_MODULE(melown_gdaldrivers)
@@ -285,6 +292,8 @@ BOOST_PYTHON_MODULE(melown_gdaldrivers)
                           (&py::BlendingDataset::Config::resolution
                            , bp::return_value_policy<bp::return_by_value>()))
             .def_readwrite("datasets", &py::BlendingDataset::Config::datasets)
+
+            .def("__repr__", &py::Config_repr)
             ;
 
         {

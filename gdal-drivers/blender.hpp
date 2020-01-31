@@ -32,6 +32,7 @@
 #include <memory>
 #include <array>
 #include <vector>
+#include <iosfwd>
 
 #include <boost/optional.hpp>
 #include <boost/filesystem/path.hpp>
@@ -115,6 +116,11 @@ private:
 
     Datasets datasets_;
 };
+
+void writeConfig(std::ostream &os, const BlendingDataset::Config &config);
+
+void writeConfig(const boost::filesystem::path &file
+                 , const BlendingDataset::Config &config);
 
 } // namespace gdal_drivers
 

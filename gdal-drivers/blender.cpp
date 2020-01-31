@@ -51,12 +51,8 @@ namespace fs = boost::filesystem;
 
 namespace gdal_drivers {
 
-void writeConfig(const fs::path &file, const BlendingDataset::Config &config)
+void writeConfig(std::ostream &f, const BlendingDataset::Config &config)
 {
-    std::ofstream f;
-    f.exceptions(std::ios::badbit | std::ios::failbit);
-    f.open(file.string(), std::ios_base::out | std::ios_base::trunc);
-
     f << "[blender]"
       << "\nextents = " << config.extents
       << "\noverlap = " << config.overlap
@@ -87,6 +83,14 @@ void writeConfig(const fs::path &file, const BlendingDataset::Config &config)
           << "\n";
     }
 
+}
+
+void writeConfig(const fs::path &file, const BlendingDataset::Config &config)
+{
+    std::ofstream f;
+    f.exceptions(std::ios::badbit | std::ios::failbit);
+    f.open(file.string(), std::ios_base::out | std::ios_base::trunc);
+    writeConfig(f, config);
     f.close();
 }
 

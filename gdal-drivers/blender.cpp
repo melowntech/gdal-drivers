@@ -96,6 +96,7 @@ void writeConfig(const fs::path &file, const BlendingDataset::Config &config)
     std::ofstream f;
     f.exceptions(std::ios::badbit | std::ios::failbit);
     f.open(file.string(), std::ios_base::out | std::ios_base::trunc);
+    f << std::fixed;
     writeConfig(f, config);
     f.close();
 }

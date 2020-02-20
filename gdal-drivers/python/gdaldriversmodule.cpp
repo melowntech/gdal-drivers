@@ -292,6 +292,13 @@ BOOST_PYTHON_MODULE(melown_gdaldrivers)
                           , bp::make_setter
                           (&py::BlendingDataset::Config::resolution
                            , bp::return_value_policy<bp::return_by_value>()))
+            .add_property("nodata"
+                          , bp::make_getter
+                          (&py::BlendingDataset::Config::nodata
+                           , bp::return_value_policy<bp::return_by_value>())
+                          , bp::make_setter
+                          (&py::BlendingDataset::Config::nodata
+                           , bp::return_value_policy<bp::return_by_value>()))
             .def_readwrite("datasets", &py::BlendingDataset::Config::datasets)
 
             .def("__repr__", &py::Config_repr)

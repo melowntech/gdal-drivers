@@ -449,7 +449,8 @@ BlendingDataset::BlendingDataset(const Config &config)
                                 , const math::Point2d &res)
     {
         const math::Point2 shiftd(p - ul(extents));
-        return math::Point2i(shiftd(0) / res(0), -shiftd(1) / res(1));
+        return math::Point2i(std::round(shiftd(0) / res(0))
+                             , std::round(-shiftd(1) / res(1)));
     });
 
     const auto &pixelExtents([&](const math::Extents2 &e

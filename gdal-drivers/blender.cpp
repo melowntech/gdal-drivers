@@ -745,26 +745,31 @@ bool loadConfig(BlendingDataset::Config &cfg, std::istream &is
         ("blender.extents", po::value(&cfg.extents)->required()
          , "Geo extents of dataset (ulx,uly:urx,ury).")
         ("blender.overlap", po::value(&cfg.overlap)->required()
-         , "Blending dataset overlap.")
+         , "Blending dataset overlap [m]. Data are blended within <overlap> "
+           "distance from edge of the valid extents of underlaying datasets.")
         ("blender.srs", po::value<geo::SrsDefinition>()
-         , "SRS definition. Use [WKT], +proj or EPSG:num.")
+         , "SRS definition override. Use [WKT], +proj or EPSG:num. Defaults to "
+           "the first dataset SRS.")
         ("blender.type", po::value< ::GDALDataType>()
-         , "Data type (Byte, Int, UInt, etc. Defaultsto first dataset "
-         "data type.")
+         , "Data type (Byte, Int, UInt, etc. Defaults to first dataset "
+           "data type.")
         ("blender.resolution", po::value<math::Size2f>()
          , "Resolution of dataset. Defaults to first dataset resolution.")
         ("blender.nodata", po::value<double>()
          , "Reported nodata value. If not set a per-dataset mask layer "
-         "is provided")
+           "is provided.")
         ;
 
     using utility::multi_value;
 
     config.add_options()
         ("dataset.path", multi_value<decltype(Config::Dataset::path)>()
-         , "Value to return.")
+         , "Path to underlaying dataset. Can be specified multiple times. "
+           "Datasets are expected to have common pixel grid.")
         ("dataset.valid", multi_value<decltype(Config::Dataset::valid)>()
-         , "Data type.")
+         , "Extents of valid data for each underlaying dataset. Extents of "
+           "neighboring datasets are expected to touch. Only pixels from valid " 
+           "area + overlap contribute to the the output.")
         ;
 
     po::basic_parsed_options<char> parsed(&config);

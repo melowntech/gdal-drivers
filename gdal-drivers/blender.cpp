@@ -430,8 +430,8 @@ BlendingDataset::BlendingDataset(const Config &config)
     // compute raster size and set geo transform
     {
         const auto es(math::size(extents));
-        nRasterXSize = es.width / resolution(0);
-        nRasterYSize = es.height / resolution(1);
+        nRasterXSize = std::round(es.width / resolution(0));
+        nRasterYSize = std::round(es.height / resolution(1));
 
         geoTransform_[0] = extents.ll(0);
         geoTransform_[1] = resolution(0);
@@ -768,7 +768,7 @@ bool loadConfig(BlendingDataset::Config &cfg, std::istream &is
            "Datasets are expected to have common pixel grid.")
         ("dataset.valid", multi_value<decltype(Config::Dataset::valid)>()
          , "Extents of valid data for each underlaying dataset. Extents of "
-           "neighboring datasets are expected to touch. Only pixels from valid " 
+           "neighboring datasets are expected to touch. Only pixels from valid "
            "area + overlap contribute to the the output.")
         ;
 

@@ -743,7 +743,8 @@ bool loadConfig(BlendingDataset::Config &cfg, std::istream &is
     po::variables_map vm;
     config.add_options()
         ("blender.extents", po::value(&cfg.extents)->required()
-         , "Geo extents of dataset (ulx,uly:urx,ury).")
+         , "Geo extents of dataset (ulx,uly:urx,ury). "
+           "Data outside these extents will be repoted as nodata.")
         ("blender.overlap", po::value(&cfg.overlap)->required()
          , "Blending dataset overlap [m]. Data are blended within <overlap> "
            "distance from edge of the valid extents of underlaying datasets.")
@@ -754,7 +755,10 @@ bool loadConfig(BlendingDataset::Config &cfg, std::istream &is
          , "Data type (Byte, Int, UInt, etc. Defaults to first dataset "
            "data type.")
         ("blender.resolution", po::value<math::Size2f>()
-         , "Resolution of dataset. Defaults to first dataset resolution.")
+         , "Override Resolution of dataset. Defaults to first dataset "
+           "resolution. Meant as work around the case when input resolution "
+           "slightly differ; will produce nonsense result if resolutions "
+           "differ significantly.")
         ("blender.nodata", po::value<double>()
          , "Reported nodata value. If not set a per-dataset mask layer "
            "is provided.")

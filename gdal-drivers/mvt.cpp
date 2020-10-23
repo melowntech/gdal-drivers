@@ -813,7 +813,17 @@ GDALDataset* MvtDataset::Open(::GDALOpenInfo *openInfo)
 
 void GDALRegister_MvtDataset()
 {
-    if (::GDALGetDriverByName("MVT")) { return; }
+    auto manager(::GetGDALDriverManager());
+
+    if (auto existing = manager->GetDriverByName("MVT")) {
+        if (existing->pfnOpen == gdal_drivers::MvtDataset::Open) {
+            // OK, this driver, again
+            return;
+        }
+
+        // another driver, nuke it
+        manager->DeregisterDriver(existing);
+    }
 
     std::unique_ptr< ::GDALDriver> driver(new ::GDALDriver());
 
@@ -826,5 +836,5 @@ void GDALRegister_MvtDataset()
     driver->pfnOpen = gdal_drivers::MvtDataset::Open;
     driver->pfnIdentify = gdal_drivers::MvtDataset::Identify;
 
-    ::GetGDALDriverManager()->RegisterDriver(driver.release());
+    manager->RegisterDriver(driver.release());
 }

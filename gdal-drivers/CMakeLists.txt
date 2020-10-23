@@ -1,5 +1,5 @@
 # bump version here
-set(gdal-drivers_VERSION 1.15)
+set(gdal-drivers_VERSION 1.16)
 
 set(gdal-drivers_DEPENDS)
 set(gdal-drivers_DEFINITIONS)

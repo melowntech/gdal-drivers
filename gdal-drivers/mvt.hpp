@@ -61,10 +61,10 @@ public:
     class Layer;
     friend class Layer;
 
-    virtual int GetLayerCount() { return layers_.size(); }
+    virtual int GetLayerCount() override { return layers_.size(); }
 
-    virtual OGRLayer* GetLayer(int);
-    virtual OGRLayer* GetLayerByName(const char *name);
+    virtual OGRLayer* GetLayer(int) override;
+    virtual OGRLayer* GetLayerByName(const char *name) override;
 
 private:
     MvtDataset(std::unique_ptr<vector_tile::Tile> tile

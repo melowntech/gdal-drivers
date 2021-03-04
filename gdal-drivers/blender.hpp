@@ -41,6 +41,8 @@
 #include "geo/srsdef.hpp"
 #include "geo/geotransform.hpp"
 
+#include "detail/srsholder.hpp"
+
 namespace gdal_drivers {
 
 /**
@@ -53,15 +55,15 @@ void closeGdalDataset(::GDALDataset *ds);
 
 } // namespace detail
 
-class BlendingDataset : public ::GDALDataset {
+class BlendingDataset : public SrsHoldingDataset {
 public:
     static ::GDALDataset* Open(GDALOpenInfo *openInfo);
 
-    virtual ~BlendingDataset() {};
+    virtual ~BlendingDataset() override {};
 
-    virtual CPLErr GetGeoTransform(double *padfTransform);
-    virtual const char *GetProjectionRef();
-    virtual int CloseDependentDatasets();
+    virtual int CloseDependentDatasets() override;
+
+    virtual CPLErr GetGeoTransform(double *padfTransform) override;
 
     class Config {
     public:
@@ -116,7 +118,7 @@ private:
     typedef std::vector<RasterBand> RasterBands;
 
     Config config_;
-    std::string srs_;
+
     geo::GeoTransform geoTransform_;
 
     math::Size2f overlap_;

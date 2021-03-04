@@ -389,9 +389,9 @@ BlendingDataset::BlendingDataset(const Config &config)
 
     // use provided srs or main dataset one
     if (config.srs) {
-        srs_ = config.srs->as(geo::SrsDefinition::Type::wkt).srs;
+        setSrs(*config.srs);
     } else {
-        srs_ = main->GetProjectionRef();
+        setSrs(main->GetProjectionRef());
     }
 
     {
@@ -500,11 +500,6 @@ CPLErr BlendingDataset::GetGeoTransform(double *padfTransform)
     std::copy(geoTransform_.begin(), geoTransform_.end()
               , padfTransform);
     return CE_None;
-}
-
-const char* BlendingDataset::GetProjectionRef()
-{
-    return srs_.c_str();
 }
 
 int BlendingDataset::CloseDependentDatasets()

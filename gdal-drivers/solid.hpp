@@ -46,6 +46,7 @@
 #include "geo/geotransform.hpp"
 
 #include "detail/extents.hpp"
+#include "detail/srsholder.hpp"
 
 namespace gdal_drivers {
 
@@ -53,7 +54,7 @@ namespace gdal_drivers {
  * @brief GttDataset
  */
 
-class SolidDataset : public GDALDataset {
+class SolidDataset : public SrsHoldingDataset {
 public:
     static ::GDALDataset* Open(GDALOpenInfo *openInfo);
 
@@ -62,10 +63,9 @@ public:
                                      , GDALProgressFunc progress
                                      , void *progressData);
 
-    virtual ~SolidDataset() {};
+    virtual ~SolidDataset() override {};
 
-    virtual CPLErr GetGeoTransform(double *padfTransform);
-    virtual const char *GetProjectionRef();
+    virtual CPLErr GetGeoTransform(double *padfTransform)  override;
 
     class Config {
     public:

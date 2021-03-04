@@ -43,6 +43,7 @@
 #include "geo/po.hpp"
 
 #include "detail/geotransform.hpp"
+
 #include "solid.hpp"
 
 namespace po = boost::program_options;
@@ -327,8 +328,8 @@ GDALDataset* SolidDataset::CreateCopy(const char *path
 }
 
 SolidDataset::SolidDataset(const Config &config)
-    : config_(config)
-    , srs_(config.srs.as(geo::SrsDefinition::Type::wkt).srs)
+    : SrsHoldingDataset(config.srs)
+    , config_(config)
 {
     if (const auto *extents = config_.extents()) {
         const auto &e(*extents);
@@ -382,11 +383,6 @@ CPLErr SolidDataset::GetGeoTransform(double *padfTransform)
     return CE_None;
 
     return CE_None;
-}
-
-const char* SolidDataset::GetProjectionRef()
-{
-    return srs_.c_str();
 }
 
 SolidDataset::RasterBand

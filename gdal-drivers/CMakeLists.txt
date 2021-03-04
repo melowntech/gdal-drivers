@@ -14,6 +14,7 @@ set(gdal-drivers_SOURCES
   detail/mbtiles.hpp
   detail/extents.hpp
   detail/geotransform.hpp
+  detail/srsholder.hpp
   )
 
 if(PROTOBUF_FOUND)

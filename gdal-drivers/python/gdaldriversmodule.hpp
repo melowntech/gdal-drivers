@@ -31,7 +31,7 @@
 
 namespace gdal_drivers { namespace py {
 
-boost::python::object import();
+boost::python::object import(const boost::python::object* = nullptr);
 
 } } // namespace gdal_drivers::py
 

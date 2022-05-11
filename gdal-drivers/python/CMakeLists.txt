@@ -4,7 +4,7 @@ define_module(LIBRARY pygdal-drivers=${MODULE_gdal-drivers_VERSION}
   math>=1.6 # optional sizes
   imgproc>=1.29 # needs numpy support
   geo
-  pysupport>=1.3
+  pysupport>=1.4
   NumPy OpenCV
   Boost_THREAD Boost_SYSTEM)
 

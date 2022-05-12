@@ -341,6 +341,7 @@ private:
     private:
         RasterBand *owner_;
     };
+    friend class MaskBand;
 
     /** List of source bands.
      */

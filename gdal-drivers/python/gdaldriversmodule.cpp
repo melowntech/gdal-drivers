@@ -24,6 +24,8 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
+#include "gdaldriversmodule.hpp"
+
 #include <ogr_core.h>
 
 #include <sstream>
@@ -58,7 +60,6 @@
 #include "../register.hpp"
 #include "../blender.hpp"
 
-#include "gdaldriversmodule.hpp"
 
 namespace bp = boost::python;
 namespace bpc = boost::python::converter;

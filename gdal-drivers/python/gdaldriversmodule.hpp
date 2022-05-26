@@ -27,6 +27,7 @@
 #ifndef gdal_drivers_python_gdaldriversmodule_hpp_included_
 #define gdal_drivers_python_gdaldriversmodule_hpp_included_
 
+#include <pysupport/boost-python-definitions.hpp>
 #include <boost/python.hpp>
 
 namespace gdal_drivers { namespace py {

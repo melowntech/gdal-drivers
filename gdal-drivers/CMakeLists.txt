@@ -45,7 +45,7 @@ endif()
 define_module(LIBRARY gdal-drivers=${gdal-drivers_VERSION}
   DEPENDS
   ${gdal-drivers_DEPENDS}
-  geo>=1.31 jsoncpp>=2.1
+  geo>=1.31 jsoncpp>=2.1 imgproc>=1.29
   Boost_PROGRAM_OPTIONS
   DEFINITIONS ${gdal-drivers_DEFINITIONS}
   )

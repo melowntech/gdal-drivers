@@ -341,6 +341,7 @@ private:
     private:
         RasterBand *owner_;
     };
+    friend class MaskBand;
 
     /** List of source bands.
      */
@@ -361,7 +362,7 @@ BlendingDataset::BlendingDataset(const Config &config)
     for (auto &ds : config.datasets) {
         Dataset dset
             (static_cast< ::GDALDataset*>
-             (::GDALOpen(ds.path.c_str(), GA_ReadOnly))
+             (::GDALOpen(ds.path.string().c_str(), GA_ReadOnly))
              , &detail::closeGdalDataset);
 
         if (!dset) {

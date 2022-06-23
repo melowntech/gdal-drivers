@@ -1,5 +1,5 @@
 # bump version here
-set(gdal-drivers_VERSION 1.18)
+set(gdal-drivers_VERSION 1.19)
 
 set(gdal-drivers_DEPENDS)
 set(gdal-drivers_DEFINITIONS)
@@ -45,7 +45,7 @@ endif()
 define_module(LIBRARY gdal-drivers=${gdal-drivers_VERSION}
   DEPENDS
   ${gdal-drivers_DEPENDS}
-  geo>=1.31 jsoncpp>=2.1 imgproc>=1.29
+  geo>=1.37 jsoncpp>=2.4 imgproc>=1.34
   Boost_PROGRAM_OPTIONS
   DEFINITIONS ${gdal-drivers_DEFINITIONS}
   )
@@ -65,7 +65,7 @@ add_library(gdal-drivers
 buildsys_library(gdal-drivers)
 
 target_link_libraries(gdal-drivers ${MODULE_LIBRARIES})
-buildsys_target_compile_definitions(gdal-drivers ${MODULE_DEFINITIONS})
+target_compile_definitions(gdal-drivers PRIVATE ${MODULE_DEFINITIONS})
 
 foreach (source ${gdal-drivers_PROTO_SOURCES})
   # disable warnings in protobuf-generated code

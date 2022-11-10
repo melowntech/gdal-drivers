@@ -440,6 +440,7 @@ struct GetValue {
     const vector_tile::Tile_Value &value;
 };
 
+#if 0
 std::ostream& operator<<(std::ostream &os, const GetValue &gv)
 {
     if (gv.value.has_string_value()) { return os << gv.value.string_value(); }
@@ -451,6 +452,7 @@ std::ostream& operator<<(std::ostream &os, const GetValue &gv)
     if (gv.value.has_bool_value()) { return os << gv.value.bool_value(); }
     return os;
 }
+#endif
 
 ::OGRFieldType ogrType(const vector_tile::Tile_Value &value)
 {

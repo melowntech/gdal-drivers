@@ -45,6 +45,7 @@
 #include "utility/raise.hpp"
 #include "utility/multivalue.hpp"
 #include "utility/streams.hpp"
+#include "utility/uncaught-exception.hpp"
 #include "geo/gdal.hpp"
 #include "geo/po.hpp"
 
@@ -204,7 +205,7 @@ public:
     {}
 
     ~GeometryReader() {
-        if (!std::uncaught_exception()) {
+        if (!utility::uncaught_exception()) {
             if (pos_ != end_) {
                 LOG(warn1) << "Not all geometry input consumed.";
             }

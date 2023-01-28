@@ -46,7 +46,7 @@ define_module(LIBRARY gdal-drivers=${gdal-drivers_VERSION}
   DEPENDS
   ${gdal-drivers_DEPENDS}
   utility>=1.43
-  geo>=1.37 jsoncpp>=2.4 imgproc>=1.34
+  geo>=1.37 jsoncppwrapper>=2.4 imgproc>=1.34
   Boost_PROGRAM_OPTIONS
   DEFINITIONS ${gdal-drivers_DEFINITIONS}
   )

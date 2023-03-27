@@ -29,7 +29,7 @@
 #include "blender.hpp"
 
 #ifdef GDAL_DRIVERS_HAS_PROTOBUF
-#  include "./mvt.hpp"
+#  include "mvt.hpp"
 #endif
 
 namespace gdal_drivers {
